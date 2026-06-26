@@ -64,7 +64,7 @@ struct EqualizerView: View {
                                 )
                                 .frame(width: thumbSize, height: thumbSize)
                                 .shadow(color: Color.orange.opacity(0.3), radius: 3)
-                                .offset(x: (geometry.size.width - thumbSize) / 2, y: thumbY)
+                                .offset(y: thumbY)
                                 .gesture(
                                     DragGesture(minimumDistance: 0)
                                         .onChanged { value in
@@ -198,7 +198,7 @@ struct EQBandControl: View {
                         .shadow(color: Color.black.opacity(0.2), radius: 2, y: 1)
                         .shadow(color: isHovered || isDragging ? Color.cyan.opacity(0.4) : Color.clear, radius: 4)
                         .frame(width: thumbSize, height: thumbSize)
-                        .offset(x: (geometry.size.width - thumbSize) / 2, y: thumbY)
+                        .offset(y: thumbY)
                         .gesture(
                             DragGesture(minimumDistance: 0)
                                 .onChanged { value in

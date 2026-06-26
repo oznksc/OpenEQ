@@ -56,7 +56,7 @@ struct PlayerControlsView: View {
                             .fill(Color.primary.opacity(0.05))
                             .frame(width: 44, height: 44)
                         
-                        Image(systemName: "music.note.vinyl")
+                        Image(systemName: "music.note")
                             .font(.title2)
                             .foregroundStyle(viewModel.selectedFileURL != nil ? Color.accentColor : Color.secondary)
                             .rotationEffect(.degrees(rotationAngle))
