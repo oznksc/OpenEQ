@@ -158,5 +158,5 @@ struct SpectrumView: View {
 
 #Preview {
     SpectrumView(levels: Array(repeating: 0.35, count: 64))
-        .frame(width: 820, height: 320)
+        .frame(width: 984, height: 384)
 }

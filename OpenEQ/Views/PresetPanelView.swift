@@ -205,5 +205,5 @@ struct PresetPanelView: View {
     PresetPanelView(
         viewModel: OpenEQViewModel(audioEngineController: AudioEngineController())
     )
-    .frame(width: 260, height: 600)
+    .frame(width: 312, height: 720)
 }

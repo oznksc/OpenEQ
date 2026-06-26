@@ -12,7 +12,7 @@ struct OpenEQApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
-                .frame(minWidth: 980, minHeight: 640)
+                .frame(minWidth: 1176, idealWidth: 1320, minHeight: 768, idealHeight: 864)
         }
         .windowStyle(.titleBar)
         .commands {

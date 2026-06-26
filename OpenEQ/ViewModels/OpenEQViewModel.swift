@@ -97,8 +97,8 @@ final class OpenEQViewModel {
             .mp3,
             .wav,
             .mpeg4Audio,
-            UTType(filenameExtension: "aiff"),
-            UTType(filenameExtension: "caf")
+            .coreAudioFormat,
+            UTType(filenameExtension: "aiff")
         ].compactMap { $0 }
         
         if panel.runModal() == .OK, let url = panel.url {
@@ -273,5 +273,12 @@ final class OpenEQViewModel {
 
     private func persistCustomPresets() {
         presetStore.saveUserPresets(userPresets)
+    }
+}
+
+// MARK: - UTType Extension
+extension UTType {
+    public static var coreAudioFormat: UTType {
+        UTType("com.apple.coreaudio-format") ?? UTType.audio
     }
 }

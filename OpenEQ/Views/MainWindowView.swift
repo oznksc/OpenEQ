@@ -32,7 +32,7 @@ struct MainWindowView: View {
 
                 // Sidebar Presets
                 PresetPanelView(viewModel: viewModel)
-                    .frame(width: 250)
+                    .frame(width: 300)
             }
 
             Divider()
@@ -121,5 +121,5 @@ struct MainWindowView: View {
     MainWindowView(
         viewModel: OpenEQViewModel(audioEngineController: AudioEngineController())
     )
-    .frame(width: 1100, height: 720)
+    .frame(width: 1320, height: 864)
 }

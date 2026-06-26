@@ -228,5 +228,5 @@ struct PlayerControlsView: View {
     PlayerControlsView(
         viewModel: OpenEQViewModel(audioEngineController: AudioEngineController())
     )
-    .frame(width: 900)
+    .frame(width: 1080)
 }

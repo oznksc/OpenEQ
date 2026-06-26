@@ -246,5 +246,5 @@ struct EQBandControl: View {
     EqualizerView(
         viewModel: OpenEQViewModel(audioEngineController: AudioEngineController())
     )
-    .frame(width: 820, height: 260)
+    .frame(width: 984, height: 312)
 }
