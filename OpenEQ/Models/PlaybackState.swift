@@ -7,22 +7,25 @@
 
 import Foundation
 
-/// Represents the current operational state of the media playback or capturing pipeline.
-enum PlaybackState: Equatable, Codable {
+/// Represents the current operational state of the audio engine.
+enum AudioEngineState: Equatable, Codable {
     case idle
-    case loading
+    case preparing
+    case ready
     case playing
     case paused
     case stopped
-    case failed(message: String)
+    case failed(String)
 
     /// Human-readable title mapping for interface components.
     var title: String {
         switch self {
         case .idle:
             return "Idle"
-        case .loading:
-            return "Loading"
+        case .preparing:
+            return "Preparing"
+        case .ready:
+            return "Ready"
         case .playing:
             return "Playing"
         case .paused:
@@ -34,3 +37,5 @@ enum PlaybackState: Equatable, Codable {
         }
     }
 }
+
+typealias PlaybackState = AudioEngineState

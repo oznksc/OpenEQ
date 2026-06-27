@@ -92,6 +92,7 @@ final class PresetStore {
         let importedPreset = EQPreset(
             id: UUID(),
             name: preset.name,
+            mode: preset.mode,
             bands: preset.bands,
             preamp: preset.preamp,
             createdAt: Date(),

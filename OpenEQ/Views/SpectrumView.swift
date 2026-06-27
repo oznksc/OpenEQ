@@ -8,19 +8,31 @@
 import SwiftUI
 
 struct SpectrumView: View {
-    let levels: [Double]
+    let levels: [Float]
+    let leftLevel: Float
+    let rightLevel: Float
+    let peakLevel: Float
+    let isClipping: Bool
     
-    @State private var peakLevels: [Double] = Array(repeating: 0.02, count: 64)
+    @State private var peakLevels: [Float] = Array(repeating: 0.0, count: SpectrumAnalyzer.barCount)
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             // Header
-            HStack {
+            HStack(spacing: 12) {
                 Label("Real-Time FFT Spectrum", systemImage: "chart.bar.xaxis")
                     .font(.headline)
                     .foregroundStyle(.primary)
                 
                 Spacer()
+
+                LevelMeterView(
+                    leftLevel: leftLevel,
+                    rightLevel: rightLevel,
+                    peakLevel: peakLevel
+                )
+
+                ClippingIndicatorView(isClipping: isClipping)
                 
                 Text("64 Bands (vDSP Transform)")
                     .font(.caption.monospaced())
@@ -58,7 +70,7 @@ struct SpectrumView: View {
                         let x = CGFloat(index) * (barWidth + spacing)
                         
                         // Main Bar
-                        let barHeight = max(2.0, size.height * CGFloat(level))
+                        let barHeight = max(1.0, size.height * CGFloat(level))
                         let barRect = CGRect(x: x, y: size.height - barHeight, width: barWidth, height: barHeight)
                         
                         let gradient = GraphicsContext.Shading.linearGradient(
@@ -75,7 +87,7 @@ struct SpectrumView: View {
                         context.fill(barPath, with: gradient)
                         
                         // Peak Hold Point (decaying dot)
-                        let peakY = size.height - max(2.0, size.height * CGFloat(peakLevel))
+                        let peakY = size.height - max(1.0, size.height * CGFloat(peakLevel))
                         let peakPath = Path(CGRect(x: x, y: peakY - 1, width: barWidth, height: 2))
                         context.fill(peakPath, with: .color(Color.teal.opacity(0.9)))
                     }
@@ -136,7 +148,7 @@ struct SpectrumView: View {
         }
     }
     
-    private func updatePeaks(with currentLevels: [Double]) {
+    private func updatePeaks(with currentLevels: [Float]) {
         if peakLevels.count != currentLevels.count {
             peakLevels = currentLevels
             return
@@ -150,13 +162,19 @@ struct SpectrumView: View {
                 peakLevels[i] = current
             } else {
                 // Smooth physical decay
-                peakLevels[i] = max(0.02, existing - 0.035)
+                peakLevels[i] = max(0.0, existing - 0.035)
             }
         }
     }
 }
 
 #Preview {
-    SpectrumView(levels: Array(repeating: 0.35, count: 64))
+    SpectrumView(
+        levels: Array(repeating: 0.35, count: SpectrumAnalyzer.barCount),
+        leftLevel: 0.62,
+        rightLevel: 0.58,
+        peakLevel: 0.62,
+        isClipping: false
+    )
         .frame(width: 984, height: 384)
 }

@@ -13,11 +13,25 @@ struct EqualizerView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             HStack {
-                Label("10-Band Graphic Equalizer", systemImage: "slider.vertical.3")
+                Label("\(viewModel.eqMode.title) Equalizer", systemImage: "slider.vertical.3")
                     .font(.headline)
                     .foregroundStyle(.primary)
 
                 Spacer()
+
+                Picker(
+                    "EQ Mode",
+                    selection: Binding(
+                        get: { viewModel.eqMode },
+                        set: { viewModel.setEQMode($0) }
+                    )
+                ) {
+                    ForEach(EQMode.allCases) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 220)
 
                 Button(action: {
                     viewModel.resetEQ()
@@ -27,100 +41,110 @@ struct EqualizerView: View {
                 .buttonStyle(.bordered)
             }
 
-            HStack(alignment: .center, spacing: 12) {
-                // 1. Preamp Slider Control
-                VStack(spacing: 8) {
-                    Text(String(format: "%+.1f dB", viewModel.preamp))
-                        .font(.system(size: 10, weight: .bold, design: .monospaced))
-                        .foregroundStyle(viewModel.preamp == 0.0 ? Color.secondary : Color.orange)
-                        .frame(height: 14)
-                    
-                    GeometryReader { geometry in
-                        let height = geometry.size.height
-                        let thumbSize: CGFloat = 16
-                        let trackHeight = height - thumbSize
-                        
-                        let percent = CGFloat((viewModel.preamp - EQBand.gainRange.lowerBound) / (EQBand.gainRange.upperBound - EQBand.gainRange.lowerBound))
-                        let thumbY = trackHeight * (1.0 - percent)
-                        
-                        ZStack(alignment: .top) {
-                            RoundedRectangle(cornerRadius: 3)
-                                .fill(Color.orange.opacity(0.12))
-                                .frame(width: 4)
-                                .frame(maxHeight: .infinity)
-                            
-                            Rectangle()
-                                .fill(Color.orange.opacity(0.4))
-                                .frame(width: 14, height: 1.5)
-                                .offset(y: trackHeight / 2 + thumbSize / 2 - 0.75)
-                            
-                            Circle()
-                                .fill(
-                                    LinearGradient(
-                                        colors: [.orange, .red],
-                                        startPoint: .top,
-                                        endPoint: .bottom
-                                    )
-                                )
-                                .frame(width: thumbSize, height: thumbSize)
-                                .shadow(color: Color.orange.opacity(0.3), radius: 3)
-                                .offset(y: thumbY)
-                                .gesture(
-                                    DragGesture(minimumDistance: 0)
-                                        .onChanged { value in
-                                            let newY = min(max(0, value.location.y - thumbSize / 2), trackHeight)
-                                            let newPercent = 1.0 - (newY / trackHeight)
-                                            let rawPreamp = EQBand.gainRange.lowerBound + Float(newPercent) * (EQBand.gainRange.upperBound - EQBand.gainRange.lowerBound)
-                                            
-                                            let snapped: Float
-                                            if abs(rawPreamp) < 0.4 {
-                                                snapped = 0.0
-                                            } else {
-                                                snapped = Float(round(rawPreamp * 2) / 2)
-                                            }
-                                            viewModel.updatePreamp(gain: snapped)
-                                        }
-                                )
-                        }
-                    }
-                    .frame(width: 28, height: 160)
-                    
-                    Text("Preamp")
-                        .font(.system(size: 11, weight: .bold, design: .rounded))
-                        .foregroundStyle(.orange)
-                        .frame(width: 52)
-                }
-                .frame(width: 58)
-                .onTapGesture(count: 2) {
-                    viewModel.updatePreamp(gain: 0.0)
-                }
-                .help("Double-click to reset preamp to 0.0 dB")
-                
-                Divider()
-                    .frame(height: 160)
-                    .padding(.horizontal, 4)
+            EQCurveView(
+                bands: viewModel.bands,
+                mode: viewModel.eqMode,
+                preamp: viewModel.preamp
+            )
 
-                // 2. EQ Bands Controls
-                ForEach(Array(viewModel.bands.enumerated()), id: \.element.id) { index, band in
-                    EQBandControl(
-                        band: band,
-                        gain: viewModel.gain(for: band.id),
-                        onGainChanged: { newGain in
-                            viewModel.updateBandGain(index: index, gain: newGain)
+            if viewModel.eqMode == .graphic {
+                HStack(alignment: .center, spacing: 12) {
+                    // 1. Preamp Slider Control
+                    VStack(spacing: 8) {
+                        Text(String(format: "%+.1f dB", viewModel.preamp))
+                            .font(.system(size: 10, weight: .bold, design: .monospaced))
+                            .foregroundStyle(viewModel.preamp == 0.0 ? Color.secondary : Color.orange)
+                            .frame(height: 14)
+                        
+                        GeometryReader { geometry in
+                            let height = geometry.size.height
+                            let thumbSize: CGFloat = 16
+                            let trackHeight = height - thumbSize
+                            
+                            let percent = CGFloat((viewModel.preamp - EQBand.gainRange.lowerBound) / (EQBand.gainRange.upperBound - EQBand.gainRange.lowerBound))
+                            let thumbY = trackHeight * (1.0 - percent)
+                            
+                            ZStack(alignment: .top) {
+                                RoundedRectangle(cornerRadius: 3)
+                                    .fill(Color.orange.opacity(0.12))
+                                    .frame(width: 4)
+                                    .frame(maxHeight: .infinity)
+                                
+                                Rectangle()
+                                    .fill(Color.orange.opacity(0.4))
+                                    .frame(width: 14, height: 1.5)
+                                    .offset(y: trackHeight / 2 + thumbSize / 2 - 0.75)
+                                
+                                Circle()
+                                    .fill(
+                                        LinearGradient(
+                                            colors: [.orange, .red],
+                                            startPoint: .top,
+                                            endPoint: .bottom
+                                        )
+                                    )
+                                    .frame(width: thumbSize, height: thumbSize)
+                                    .shadow(color: Color.orange.opacity(0.3), radius: 3)
+                                    .offset(y: thumbY)
+                                    .gesture(
+                                        DragGesture(minimumDistance: 0)
+                                            .onChanged { value in
+                                                let newY = min(max(0, value.location.y - thumbSize / 2), trackHeight)
+                                                let newPercent = 1.0 - (newY / trackHeight)
+                                                let rawPreamp = EQBand.gainRange.lowerBound + Float(newPercent) * (EQBand.gainRange.upperBound - EQBand.gainRange.lowerBound)
+                                                
+                                                let snapped: Float
+                                                if abs(rawPreamp) < 0.4 {
+                                                    snapped = 0.0
+                                                } else {
+                                                    snapped = Float(round(rawPreamp * 2) / 2)
+                                                }
+                                                viewModel.updatePreamp(gain: snapped)
+                                            }
+                                    )
+                            }
                         }
-                    )
+                        .frame(width: 28, height: 160)
+                        
+                        Text("Preamp")
+                            .font(.system(size: 11, weight: .bold, design: .rounded))
+                            .foregroundStyle(.orange)
+                            .frame(width: 52)
+                    }
+                    .frame(width: 58)
+                    .onTapGesture(count: 2) {
+                        viewModel.updatePreamp(gain: 0.0)
+                    }
+                    .help("Double-click to reset preamp to 0.0 dB")
+                    
+                    Divider()
+                        .frame(height: 160)
+                        .padding(.horizontal, 4)
+
+                    // 2. EQ Bands Controls
+                    ForEach(Array(viewModel.bands.enumerated()), id: \.element.id) { index, band in
+                        EQBandControl(
+                            band: band,
+                            gain: viewModel.gain(for: band.id),
+                            onGainChanged: { newGain in
+                                viewModel.updateBandGain(index: index, gain: newGain)
+                            }
+                        )
+                    }
                 }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+                .background(
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(Color.primary.opacity(0.02))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(Color.primary.opacity(0.04), lineWidth: 1)
+                )
+            } else {
+                ParametricEQView(viewModel: viewModel)
             }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 8)
-            .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(Color.primary.opacity(0.02))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .stroke(Color.primary.opacity(0.04), lineWidth: 1)
-            )
         }
         .padding(20)
     }

@@ -1,5 +1,5 @@
 //
-//  ContentView.swift
+// ContentView.swift
 //  OpenEQ
 //
 //  Created by Gökmen on 26.06.2026.

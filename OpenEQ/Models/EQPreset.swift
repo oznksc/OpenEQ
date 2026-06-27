@@ -11,6 +11,7 @@ import Foundation
 struct EQPreset: Identifiable, Codable, Equatable {
     let id: UUID
     let name: String
+    var mode: EQMode
     var bands: [EQBand]
     var preamp: Float
     let createdAt: Date
@@ -19,6 +20,7 @@ struct EQPreset: Identifiable, Codable, Equatable {
     init(
         id: UUID = UUID(),
         name: String,
+        mode: EQMode = .graphic,
         bands: [EQBand],
         preamp: Float = 0.0,
         createdAt: Date = Date(),
@@ -26,17 +28,41 @@ struct EQPreset: Identifiable, Codable, Equatable {
     ) {
         self.id = id
         self.name = name
+        self.mode = mode
         self.bands = bands
         self.preamp = preamp
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case mode
+        case bands
+        case preamp
+        case createdAt
+        case updatedAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            id: try container.decode(UUID.self, forKey: .id),
+            name: try container.decode(String.self, forKey: .name),
+            mode: try container.decodeIfPresent(EQMode.self, forKey: .mode) ?? .graphic,
+            bands: try container.decode([EQBand].self, forKey: .bands),
+            preamp: try container.decode(Float.self, forKey: .preamp),
+            createdAt: try container.decode(Date.self, forKey: .createdAt),
+            updatedAt: try container.decode(Date.self, forKey: .updatedAt)
+        )
     }
 }
 
 extension EQPreset {
     /// Returns a standard flat preset.
     static func flatPreset() -> EQPreset {
-        EQPreset(name: "Flat", bands: EQBand.defaultBands(), preamp: 0.0)
+        EQPreset(name: "Flat", mode: .graphic, bands: EQBand.defaultBands(), preamp: 0.0)
     }
 
     /// Backwards compatibility property.

@@ -21,7 +21,13 @@ struct MainWindowView: View {
             HStack(spacing: 0) {
                 // Main Panel (Visualizer & Faders)
                 VStack(spacing: 0) {
-                    SpectrumView(levels: viewModel.spectrumLevels)
+                    SpectrumView(
+                        levels: viewModel.spectrumLevels,
+                        leftLevel: viewModel.leftLevel,
+                        rightLevel: viewModel.rightLevel,
+                        peakLevel: viewModel.peakLevel,
+                        isClipping: viewModel.isClipping
+                    )
                     
                     Divider()
                     
@@ -109,7 +115,9 @@ struct MainWindowView: View {
             return .gray
         case .idle:
             return .gray
-        case .loading:
+        case .preparing:
+            return .blue
+        case .ready:
             return .blue
         case .failed:
             return .red

@@ -11,70 +11,137 @@ import Observation
 
 @Observable
 final class AudioEngineController {
-    private(set) var playbackState: PlaybackState = .stopped
+    private(set) var playbackState: AudioEngineState = .idle
     private(set) var currentPreset: EQPreset = .flatPreset()
-    private(set) var spectrumLevels: [Double] = Array(repeating: 0.02, count: 64)
+    private(set) var spectrumLevels: [Float] = Array(repeating: 0.0, count: SpectrumAnalyzer.barCount)
+    private(set) var leftLevel: Float = 0.0
+    private(set) var rightLevel: Float = 0.0
+    private(set) var peakLevel: Float = 0.0
+    private(set) var isClipping: Bool = false
 
+    private let logger = AppLogger(category: "AudioEngine")
     private let engine = AVAudioEngine()
     private let player = AVAudioPlayerNode()
     private let eq = AVAudioUnitEQ(numberOfBands: 10)
     private let analyzer = SpectrumAnalyzer()
     
     private var audioFile: AVAudioFile?
+    private var currentFileURL: URL?
+    private var isGraphConnected = false
+    private var isTapInstalled = false
 
     init() {
-        setupAudioGraph()
+        configureEQ()
     }
     
-    private func setupAudioGraph() {
-        engine.attach(player)
-        engine.attach(eq)
-        
-        let frequencies: [Float] = [32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000]
-        for (i, freq) in frequencies.enumerated() {
-            let band = eq.bands[i]
-            band.frequency = freq
-            band.filterType = .parametric
-            band.bandwidth = 1.0
-            band.gain = 0.0
-            band.bypass = false
-        }
-        
-        // Initial connection using standard format
-        let format = engine.mainMixerNode.inputFormat(forBus: 0)
-        engine.connect(player, to: eq, format: format)
-        engine.connect(eq, to: engine.mainMixerNode, format: format)
+    deinit {
+        teardown()
     }
 
-    func startEngineIfNeeded() throws {
-        if !engine.isRunning {
-            try engine.start()
+    private func configureEQ() {
+        for (index, modelBand) in EQBand.defaultBands().enumerated() {
+            let audioBand = eq.bands[index]
+            audioBand.frequency = modelBand.frequency
+            audioBand.filterType = .parametric
+            audioBand.bandwidth = EQBand.defaultQ
+            audioBand.gain = EQBand.neutralGain
+            audioBand.bypass = false
         }
+    }
+
+    private func attachNodesIfNeeded() {
+        if player.engine == nil {
+            engine.attach(player)
+        }
+
+        if eq.engine == nil {
+            engine.attach(eq)
+        }
+    }
+
+    private func connectGraph(format: AVAudioFormat) throws {
+        guard format.channelCount > 0, format.sampleRate > 0 else {
+            throw AudioEngineError.audioGraphConnectionFailed("Invalid file format.")
+        }
+
+        attachNodesIfNeeded()
+
+        if isGraphConnected {
+            engine.disconnectNodeOutput(player)
+            engine.disconnectNodeOutput(eq)
+            isGraphConnected = false
+        }
+
+        // Signal chain: playerNode -> eqNode -> mainMixerNode.
+        engine.connect(player, to: eq, format: format)
+        engine.connect(eq, to: engine.mainMixerNode, format: format)
+        isGraphConnected = true
+    }
+
+    private func startEngineIfNeeded() throws {
+        if !engine.isRunning {
+            do {
+                try engine.start()
+            } catch {
+                throw AudioEngineError.engineFailedToStart(error.localizedDescription)
+            }
+        }
+    }
+
+    func prepare(url: URL) throws {
+        logger.info("Preparing audio file: \(url.lastPathComponent)")
+        playbackState = .preparing
+
+        stop(clearFile: true)
+        playbackState = .preparing
+
+        guard url.isFileURL else {
+            let error = AudioEngineError.unsupportedFile(url)
+            fail(error)
+            throw error
+        }
+
+        guard FileManager.default.isReadableFile(atPath: url.path) else {
+            let error = AudioEngineError.fileCouldNotBeRead(url)
+            fail(error)
+            throw error
+        }
+
+        let file: AVAudioFile
+        do {
+            file = try AVAudioFile(forReading: url)
+        } catch {
+            let engineError = AudioEngineError.unsupportedFile(url)
+            fail(engineError)
+            throw engineError
+        }
+
+        do {
+            try connectGraph(format: file.processingFormat)
+        } catch {
+            fail(error)
+            throw error
+        }
+
+        audioFile = file
+        currentFileURL = url
+        player.scheduleFile(file, at: nil, completionHandler: nil)
+        playbackState = .ready
+        logger.info("Audio file ready: \(url.lastPathComponent)")
     }
 
     func loadFile(url: URL) throws {
-        // Prevent tapping conflicts by stopping and resetting prior taps
-        removeTap()
-        player.stop()
-        
-        let file = try AVAudioFile(forReading: url)
-        self.audioFile = file
-        
-        // Reconnect node graph using loaded file format to match channels and sample rate
-        let format = file.processingFormat
-        engine.connect(player, to: eq, format: format)
-        engine.connect(eq, to: engine.mainMixerNode, format: format)
-        
-        try startEngineIfNeeded()
-        
-        // Schedule audio file for playback
-        player.scheduleFile(file, at: nil, completionHandler: nil)
-        playbackState = .stopped
+        try prepare(url: url)
     }
 
     func play() {
         guard audioFile != nil else {
-            playbackState = .failed(message: "No audio file loaded")
+            fail(AudioEngineError.playbackFailed("No audio file loaded."))
+            return
+        }
+
+        guard isGraphConnected else {
+            fail(AudioEngineError.audioGraphConnectionFailed("Audio graph is not connected."))
             return
         }
         
@@ -82,49 +149,84 @@ final class AudioEngineController {
             try startEngineIfNeeded()
             player.play()
             playbackState = .playing
-            
-            // Hook up real-time audio sample capture
             installTap()
+            logger.info("Playback started")
         } catch {
-            playbackState = .failed(message: error.localizedDescription)
+            fail(error)
         }
     }
 
     func pause() {
+        guard playbackState == .playing else { return }
         player.pause()
         playbackState = .paused
         removeTap()
+        logger.info("Playback paused")
     }
 
     func stop() {
+        stop(clearFile: false)
+    }
+
+    private func stop(clearFile: Bool) {
         removeTap()
         player.stop()
-        playbackState = .stopped
+        engine.pause()
         
-        // Re-schedule file so play starts from beginning
-        if let file = audioFile {
+        if clearFile {
+            audioFile = nil
+            currentFileURL = nil
+            playbackState = .idle
+        } else if let file = audioFile {
             player.scheduleFile(file, at: nil, completionHandler: nil)
+            playbackState = .stopped
+        } else {
+            playbackState = .idle
         }
         
-        DispatchQueue.main.async {
-            self.spectrumLevels = Array(repeating: 0.02, count: 64)
+        resetAnalysisState()
+        logger.info("Playback stopped")
+    }
+
+    func restart() {
+        guard audioFile != nil else {
+            fail(AudioEngineError.playbackFailed("No audio file loaded."))
+            return
         }
+
+        stop(clearFile: false)
+        play()
     }
 
     func seekToStart() {
-        let wasPlaying = player.isPlaying
-        
+        restart()
+    }
+
+    func teardown() {
+        logger.info("Tearing down audio engine")
         removeTap()
         player.stop()
-        
-        if let file = audioFile {
-            player.scheduleFile(file, at: nil, completionHandler: nil)
+        engine.stop()
+        engine.reset()
+
+        if isGraphConnected {
+            engine.disconnectNodeOutput(player)
+            engine.disconnectNodeOutput(eq)
+            isGraphConnected = false
         }
-        
-        if wasPlaying {
-            player.play()
-            installTap()
+
+        if player.engine != nil {
+            engine.detach(player)
         }
+
+        if eq.engine != nil {
+            engine.detach(eq)
+        }
+
+        audioFile = nil
+        currentFileURL = nil
+        playbackState = .idle
+        resetAnalysisState(dispatchToMain: false)
     }
 
     func setBandGain(index: Int, gain: Float) {
@@ -138,19 +240,48 @@ final class AudioEngineController {
         eq.bands[index].bypass = !isEnabled
     }
 
+    func applyMode(_ mode: EQMode, bands: [EQBand]) {
+        currentPreset = EQPreset(
+            id: currentPreset.id,
+            name: currentPreset.name,
+            mode: mode,
+            bands: bands,
+            preamp: currentPreset.preamp,
+            createdAt: currentPreset.createdAt,
+            updatedAt: Date()
+        )
+
+        let activeBandCount = min(bands.count, eq.bands.count)
+
+        for index in 0..<eq.bands.count {
+            let audioBand = eq.bands[index]
+
+            guard index < activeBandCount else {
+                audioBand.bypass = true
+                audioBand.gain = EQBand.neutralGain
+                continue
+            }
+
+            let modelBand = bands[index]
+            audioBand.frequency = modelBand.frequency
+            audioBand.gain = modelBand.gain
+            audioBand.bandwidth = modelBand.q
+            audioBand.filterType = modelBand.audioUnitFilterType(for: mode)
+            audioBand.bypass = !modelBand.isEnabled
+        }
+    }
+
     func setPreampGain(_ gain: Float) {
         let clampedGain = max(EQBand.gainRange.lowerBound, min(EQBand.gainRange.upperBound, gain))
         let volumeMultiplier = pow(10.0, clampedGain / 20.0)
         player.volume = volumeMultiplier
+        currentPreset.preamp = clampedGain
     }
 
     func applyPreset(_ preset: EQPreset) {
         currentPreset = preset
         setPreampGain(preset.preamp)
-        for (i, band) in preset.bands.enumerated() {
-            setBandGain(index: i, gain: band.gain)
-            setBandEnabled(index: i, isEnabled: band.isEnabled)
-        }
+        applyMode(preset.mode, bands: preset.bands)
     }
 
     func updateBand(_ band: EQBand) {
@@ -159,35 +290,85 @@ final class AudioEngineController {
         }
 
         currentPreset.bands[index] = band
-        setBandGain(index: index, gain: band.gain)
-        setBandEnabled(index: index, isEnabled: band.isEnabled)
+        applyMode(currentPreset.mode, bands: currentPreset.bands)
     }
 
     // MARK: - Tap Installer and Callback
     
     private func installTap() {
-        engine.mainMixerNode.removeTap(onBus: 0)
+        guard !isTapInstalled else { return }
         
         let format = engine.mainMixerNode.outputFormat(forBus: 0)
         
-        // Tap format should match the output bus format. Frame size 1024.
+        // The mixer tap feeds post-EQ PCM into SpectrumAnalyzer; UI state is updated on main.
         engine.mainMixerNode.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
             guard let self = self else { return }
-            
-            // Process the buffer through our Accelerate DFT analyzer
-            let normalizedLevels = self.analyzer.analyze(buffer: buffer)
-            
-            let doubleLevels = normalizedLevels.map { Double($0) }
-            
-            if !doubleLevels.isEmpty {
-                DispatchQueue.main.async {
-                    self.spectrumLevels = doubleLevels
-                }
+
+            guard let analysis = self.analyzer.analyze(buffer: buffer) else {
+                return
+            }
+
+            DispatchQueue.main.async {
+                self.spectrumLevels = analysis.levels
+                self.leftLevel = analysis.leftPeak
+                self.rightLevel = analysis.rightPeak
+                self.peakLevel = analysis.peakLevel
+                self.isClipping = analysis.isClipping
             }
         }
+
+        isTapInstalled = true
     }
     
     private func removeTap() {
+        guard isTapInstalled else { return }
         engine.mainMixerNode.removeTap(onBus: 0)
+        isTapInstalled = false
+    }
+
+    private func fail(_ error: Error) {
+        let message = error.localizedDescription
+        logger.error(message)
+        playbackState = .failed(message)
+        removeTap()
+    }
+
+    private func resetAnalysisState(dispatchToMain: Bool = true) {
+        let analysis = analyzer.reset()
+
+        let update = {
+            self.spectrumLevels = analysis.levels
+            self.leftLevel = analysis.leftPeak
+            self.rightLevel = analysis.rightPeak
+            self.peakLevel = analysis.peakLevel
+            self.isClipping = analysis.isClipping
+        }
+
+        if dispatchToMain {
+            DispatchQueue.main.async(execute: update)
+        } else {
+            update()
+        }
+    }
+}
+
+private extension EQBand {
+    func audioUnitFilterType(for mode: EQMode) -> AVAudioUnitEQFilterType {
+        if mode == .graphic {
+            return .parametric
+        }
+
+        switch filterType {
+        case .parametric:
+            return .parametric
+        case .lowShelf:
+            return .lowShelf
+        case .highShelf:
+            return .highShelf
+        case .highPass:
+            return .highPass
+        case .lowPass:
+            return .lowPass
+        }
     }
 }

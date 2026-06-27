@@ -16,16 +16,33 @@ final class OpenEQViewModel {
     // Published State
     var selectedFileURL: URL?
     var selectedFileName: String = "No File Selected"
+    var eqMode: EQMode
     var bands: [EQBand]
     var preamp: Float
     var errorMessage: String?
     
-    var playbackState: PlaybackState {
+    var playbackState: AudioEngineState {
         audioEngineController.playbackState
     }
 
-    var spectrumLevels: [Double] {
+    var spectrumLevels: [Float] {
         audioEngineController.spectrumLevels
+    }
+
+    var leftLevel: Float {
+        audioEngineController.leftLevel
+    }
+
+    var rightLevel: Float {
+        audioEngineController.rightLevel
+    }
+
+    var peakLevel: Float {
+        audioEngineController.peakLevel
+    }
+
+    var isClipping: Bool {
+        audioEngineController.isClipping
     }
 
     var presets: [EQPreset]
@@ -36,6 +53,8 @@ final class OpenEQViewModel {
 
     private let audioEngineController: AudioEngineController
     private let presetStore = PresetStore()
+    private var graphicBands: [EQBand]
+    private var parametricBands: [EQBand]
 
     init(audioEngineController: AudioEngineController) {
         self.audioEngineController = audioEngineController
@@ -49,7 +68,10 @@ final class OpenEQViewModel {
         
         let initialPreset = EQPreset.flatPreset()
         self.selectedPreset = initialPreset
+        self.eqMode = initialPreset.mode
         self.bands = initialPreset.bands
+        self.graphicBands = initialPreset.bands
+        self.parametricBands = EQBand.defaultParametricBands()
         self.preamp = initialPreset.preamp
         self.volume = 0.72
         self.isMuted = false
@@ -80,8 +102,10 @@ final class OpenEQViewModel {
         switch playbackState {
         case .playing:
             pause()
-        case .paused, .stopped, .idle, .loading, .failed:
+        case .paused, .stopped, .idle, .ready, .failed:
             play()
+        case .preparing:
+            break
         }
     }
 
@@ -109,7 +133,7 @@ final class OpenEQViewModel {
     func loadAudioFile(url: URL) {
         do {
             errorMessage = nil
-            try audioEngineController.loadFile(url: url)
+            try audioEngineController.prepare(url: url)
             selectedFileURL = url
             selectedFileName = url.lastPathComponent
         } catch {
@@ -121,6 +145,16 @@ final class OpenEQViewModel {
 
     // MARK: - EQ Controls
 
+    func setEQMode(_ mode: EQMode) {
+        guard mode != eqMode else { return }
+
+        cacheActiveBands()
+        eqMode = mode
+        bands = bandsForMode(mode)
+        selectedPreset = EQPreset(name: "Custom", mode: eqMode, bands: bands, preamp: preamp)
+        audioEngineController.applyPreset(selectedPreset)
+    }
+
     func gain(for bandID: EQBand.ID) -> Float {
         bands.first { $0.id == bandID }?.gain ?? EQBand.neutralGain
     }
@@ -131,27 +165,56 @@ final class OpenEQViewModel {
         }
 
         bands[index].gain = gain
-        selectedPreset = EQPreset(name: "Custom", bands: bands, preamp: preamp)
+        commitActiveBandsAsCustom()
         audioEngineController.updateBand(bands[index])
     }
 
     func updateBandGain(index: Int, gain: Float) {
         guard index >= 0 && index < bands.count else { return }
         bands[index].gain = gain
-        selectedPreset = EQPreset(name: "Custom", bands: bands, preamp: preamp)
+        commitActiveBandsAsCustom()
+        audioEngineController.updateBand(bands[index])
+    }
+
+    func updateBandFrequency(index: Int, frequency: Float) {
+        guard index >= 0 && index < bands.count else { return }
+        bands[index].frequency = frequency
+        commitActiveBandsAsCustom()
+        audioEngineController.updateBand(bands[index])
+    }
+
+    func updateBandQ(index: Int, q: Float) {
+        guard index >= 0 && index < bands.count else { return }
+        bands[index].q = q
+        commitActiveBandsAsCustom()
+        audioEngineController.updateBand(bands[index])
+    }
+
+    func updateBandFilterType(index: Int, filterType: EQFilterType) {
+        guard index >= 0 && index < bands.count else { return }
+        bands[index].filterType = filterType
+        commitActiveBandsAsCustom()
+        audioEngineController.updateBand(bands[index])
+    }
+
+    func updateBandEnabled(index: Int, isEnabled: Bool) {
+        guard index >= 0 && index < bands.count else { return }
+        bands[index].isEnabled = isEnabled
+        commitActiveBandsAsCustom()
         audioEngineController.updateBand(bands[index])
     }
 
     func updatePreamp(gain: Float) {
         preamp = gain
         audioEngineController.setPreampGain(gain)
-        selectedPreset = EQPreset(name: "Custom", bands: bands, preamp: preamp)
+        selectedPreset = EQPreset(name: "Custom", mode: eqMode, bands: bands, preamp: preamp)
     }
 
     func resetEQ() {
-        bands = EQBand.defaultBands()
+        bands = EQBand.defaultBands(for: eqMode)
         preamp = 0.0
-        selectedPreset = EQPreset.flatPreset()
+        cacheActiveBands()
+        selectedPreset = EQPreset(name: "Flat", mode: eqMode, bands: bands, preamp: preamp)
         audioEngineController.applyPreset(selectedPreset)
     }
 
@@ -177,6 +240,7 @@ final class OpenEQViewModel {
             let updatedPreset = EQPreset(
                 id: userPresets[existingIndex].id,
                 name: trimmedName,
+                mode: eqMode,
                 bands: bands,
                 preamp: preamp,
                 createdAt: userPresets[existingIndex].createdAt,
@@ -186,7 +250,7 @@ final class OpenEQViewModel {
             selectedPreset = updatedPreset
         } else {
             // Create a new user preset
-            let newPreset = EQPreset(name: trimmedName, bands: bands, preamp: preamp)
+            let newPreset = EQPreset(name: trimmedName, mode: eqMode, bands: bands, preamp: preamp)
             userPresets.append(newPreset)
             selectedPreset = newPreset
         }
@@ -215,8 +279,11 @@ final class OpenEQViewModel {
     }
 
     func applyPreset(_ preset: EQPreset) {
+        cacheActiveBands()
         selectedPreset = preset
+        eqMode = preset.mode
         bands = preset.bands
+        cacheActiveBands()
         preamp = preset.preamp
         audioEngineController.applyPreset(preset)
     }
@@ -273,6 +340,29 @@ final class OpenEQViewModel {
 
     private func persistCustomPresets() {
         presetStore.saveUserPresets(userPresets)
+    }
+
+    private func cacheActiveBands() {
+        switch eqMode {
+        case .graphic:
+            graphicBands = bands
+        case .parametric:
+            parametricBands = bands
+        }
+    }
+
+    private func bandsForMode(_ mode: EQMode) -> [EQBand] {
+        switch mode {
+        case .graphic:
+            return graphicBands.isEmpty ? EQBand.defaultBands() : graphicBands
+        case .parametric:
+            return parametricBands.isEmpty ? EQBand.defaultParametricBands() : parametricBands
+        }
+    }
+
+    private func commitActiveBandsAsCustom() {
+        cacheActiveBands()
+        selectedPreset = EQPreset(name: "Custom", mode: eqMode, bands: bands, preamp: preamp)
     }
 }
 
