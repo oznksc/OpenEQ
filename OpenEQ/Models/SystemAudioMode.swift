@@ -1,30 +1,25 @@
-//
-//  SystemAudioMode.swift
-//  OpenEQ
-//
-//  Created by Ozan
-//
-
 import Foundation
 
 enum SystemAudioMode: String, CaseIterable, Codable, Identifiable {
     case disabled
-    case monitorOnly
+    case systemEQ
     case externalLoopback
-    case nativeTapExperimental
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .disabled:
-            return "Disabled"
-        case .monitorOnly:
-            return "Monitor Only"
-        case .externalLoopback:
-            return "External Loopback"
-        case .nativeTapExperimental:
-            return "Native Tap Experimental"
+        case .disabled: return "Disabled"
+        case .systemEQ: return "System-Wide EQ"
+        case .externalLoopback: return "External Loopback"
+        }
+    }
+
+    var description: String {
+        switch self {
+        case .disabled: return "EQ applies to local files only"
+        case .systemEQ: return "EQ applies to all system audio via Core Audio Tap"
+        case .externalLoopback: return "Route system audio through a virtual device"
         }
     }
 }
