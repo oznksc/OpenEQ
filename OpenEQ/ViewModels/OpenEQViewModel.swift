@@ -20,29 +20,83 @@ final class OpenEQViewModel {
     var bands: [EQBand]
     var preamp: Float
     var errorMessage: String?
+    var isEnabled: Bool = true
+    var graphicBandCount: GraphicBandCount = .ten
+    var isVolumeBoostEnabled: Bool = false
+    var sponsors: [Sponsor] = []
     
     var playbackState: AudioEngineState {
         audioEngineController.playbackState
     }
 
     var spectrumLevels: [Float] {
-        audioEngineController.spectrumLevels
+        if isSystemAudioVisualizationActive {
+            return systemAudioManager.spectrumLevels
+        }
+
+        return audioEngineController.spectrumLevels
     }
 
     var leftLevel: Float {
-        audioEngineController.leftLevel
+        if isSystemAudioVisualizationActive {
+            return systemAudioManager.leftLevel
+        }
+
+        return audioEngineController.leftLevel
     }
 
     var rightLevel: Float {
-        audioEngineController.rightLevel
+        if isSystemAudioVisualizationActive {
+            return systemAudioManager.rightLevel
+        }
+
+        return audioEngineController.rightLevel
     }
 
     var peakLevel: Float {
-        audioEngineController.peakLevel
+        if isSystemAudioVisualizationActive {
+            return systemAudioManager.peakLevel
+        }
+
+        return audioEngineController.peakLevel
     }
 
     var isClipping: Bool {
-        audioEngineController.isClipping
+        if isSystemAudioVisualizationActive {
+            return systemAudioManager.isClipping
+        }
+
+        return audioEngineController.isClipping
+    }
+
+    var spectrumTitle: String {
+        if isExternalLoopbackActive {
+            return "External Loopback EQ"
+        }
+
+        return isSystemAudioMonitorActive ? "System Audio Monitor" : "Real-Time FFT Spectrum"
+    }
+
+    var spectrumWarning: String? {
+        if isExternalLoopbackActive {
+            return "External loopback applies EQ to a user-installed virtual input and plays it to your selected output."
+        }
+
+        return isSystemAudioMonitorActive
+        ? "Monitor mode analyzes system audio only. It does not apply EQ to system output."
+        : nil
+    }
+
+    var isSystemAudioMonitorActive: Bool {
+        systemAudioMode == .nativeTapExperimental && systemAudioStatus == .running
+    }
+
+    var isExternalLoopbackActive: Bool {
+        systemAudioMode == .externalLoopback && systemAudioStatus == .running
+    }
+
+    var isSystemAudioVisualizationActive: Bool {
+        isSystemAudioMonitorActive || isExternalLoopbackActive
     }
 
     var presets: [EQPreset]
@@ -50,14 +104,33 @@ final class OpenEQViewModel {
     var selectedPreset: EQPreset
     var volume: Double
     var isMuted: Bool
+    var systemAudioMode: SystemAudioMode
+    var systemAudioStatus: SystemAudioStatus
+    var selectedSystemInputDevice: AudioDevice?
+    var selectedSystemOutputDevice: AudioDevice?
+    var availableInputDevices: [AudioDevice]
+    var availableOutputDevices: [AudioDevice]
+    var detectedBlackHoleDevice: AudioDevice?
+    var externalLoopbackLatency: TimeInterval?
+    var isExternalLoopbackBypassed: Bool
 
     private let audioEngineController: AudioEngineController
+    private let systemAudioManager: SystemAudioManager
     private let presetStore = PresetStore()
+    private let sponsorStore = SponsorStore()
     private var graphicBands: [EQBand]
     private var parametricBands: [EQBand]
 
-    init(audioEngineController: AudioEngineController) {
+    convenience init(audioEngineController: AudioEngineController) {
+        self.init(
+            audioEngineController: audioEngineController,
+            systemAudioManager: SystemAudioManager()
+        )
+    }
+
+    init(audioEngineController: AudioEngineController, systemAudioManager: SystemAudioManager) {
         self.audioEngineController = audioEngineController
+        self.systemAudioManager = systemAudioManager
         
         // Load custom user presets at app start via local variable
         let loadedUserPresets = presetStore.loadUserPresets()
@@ -75,7 +148,19 @@ final class OpenEQViewModel {
         self.preamp = initialPreset.preamp
         self.volume = 0.72
         self.isMuted = false
-        
+        self.systemAudioMode = systemAudioManager.mode
+        self.systemAudioStatus = systemAudioManager.status
+        self.selectedSystemInputDevice = systemAudioManager.selectedInputDevice
+        self.selectedSystemOutputDevice = systemAudioManager.selectedOutputDevice
+        self.availableInputDevices = systemAudioManager.availableInputDevices
+        self.availableOutputDevices = systemAudioManager.availableOutputDevices
+        self.detectedBlackHoleDevice = systemAudioManager.detectedBlackHoleDevice
+        self.externalLoopbackLatency = systemAudioManager.externalLoopbackLatency
+        self.isExternalLoopbackBypassed = systemAudioManager.isExternalLoopbackBypassed
+
+        self.sponsors = sponsorStore.loadSponsors()
+
+        self.audioEngineController.currentGraphicBandCount = .ten
         self.audioEngineController.applyPreset(initialPreset)
     }
 
@@ -143,6 +228,77 @@ final class OpenEQViewModel {
         }
     }
 
+    // MARK: - System Audio Beta
+
+    func refreshSystemAudioDevices() {
+        systemAudioManager.refreshDevices()
+        syncSystemAudioState()
+    }
+
+    func setSystemAudioMode(_ mode: SystemAudioMode) {
+        systemAudioManager.setMode(mode)
+        syncSystemAudioState()
+    }
+
+    func selectSystemInputDevice(_ device: AudioDevice?) {
+        systemAudioManager.selectInputDevice(device)
+        syncSystemAudioState()
+    }
+
+    func selectSystemOutputDevice(_ device: AudioDevice?) {
+        systemAudioManager.selectOutputDevice(device)
+        syncSystemAudioState()
+    }
+
+    func selectSystemInputDevice(id: AudioDevice.ID?) {
+        selectSystemInputDevice(availableInputDevices.first { $0.id == id })
+    }
+
+    func selectSystemOutputDevice(id: AudioDevice.ID?) {
+        selectSystemOutputDevice(availableOutputDevices.first { $0.id == id })
+    }
+
+    func startSystemAudioBeta() {
+        systemAudioManager.start()
+        syncSystemAudioState()
+    }
+
+    func stopSystemAudioBeta() {
+        systemAudioManager.stop()
+        syncSystemAudioState()
+    }
+
+    func startSystemAudioMonitor() {
+        systemAudioManager.startSystemAudioMonitor()
+        syncSystemAudioState()
+    }
+
+    func stopSystemAudioMonitor() {
+        systemAudioManager.stopSystemAudioMonitor()
+        syncSystemAudioState()
+    }
+
+    func startExternalLoopbackMode() {
+        stop()
+        systemAudioManager.startExternalLoopback(preset: currentLoopbackPreset())
+        syncSystemAudioState()
+    }
+
+    func stopExternalLoopbackMode() {
+        systemAudioManager.stopExternalLoopback()
+        syncSystemAudioState()
+    }
+
+    func restartExternalLoopbackMode() {
+        systemAudioManager.restartExternalLoopback(preset: currentLoopbackPreset())
+        syncSystemAudioState()
+    }
+
+    func setExternalLoopbackBypassed(_ isBypassed: Bool) {
+        systemAudioManager.setExternalLoopbackBypassed(isBypassed)
+        syncSystemAudioState()
+    }
+
     // MARK: - EQ Controls
 
     func setEQMode(_ mode: EQMode) {
@@ -153,6 +309,7 @@ final class OpenEQViewModel {
         bands = bandsForMode(mode)
         selectedPreset = EQPreset(name: "Custom", mode: eqMode, bands: bands, preamp: preamp)
         audioEngineController.applyPreset(selectedPreset)
+        updateExternalLoopbackEQIfNeeded()
     }
 
     func gain(for bandID: EQBand.ID) -> Float {
@@ -167,6 +324,7 @@ final class OpenEQViewModel {
         bands[index].gain = gain
         commitActiveBandsAsCustom()
         audioEngineController.updateBand(bands[index])
+        updateExternalLoopbackEQIfNeeded()
     }
 
     func updateBandGain(index: Int, gain: Float) {
@@ -174,6 +332,7 @@ final class OpenEQViewModel {
         bands[index].gain = gain
         commitActiveBandsAsCustom()
         audioEngineController.updateBand(bands[index])
+        updateExternalLoopbackEQIfNeeded()
     }
 
     func updateBandFrequency(index: Int, frequency: Float) {
@@ -181,6 +340,7 @@ final class OpenEQViewModel {
         bands[index].frequency = frequency
         commitActiveBandsAsCustom()
         audioEngineController.updateBand(bands[index])
+        updateExternalLoopbackEQIfNeeded()
     }
 
     func updateBandQ(index: Int, q: Float) {
@@ -188,6 +348,7 @@ final class OpenEQViewModel {
         bands[index].q = q
         commitActiveBandsAsCustom()
         audioEngineController.updateBand(bands[index])
+        updateExternalLoopbackEQIfNeeded()
     }
 
     func updateBandFilterType(index: Int, filterType: EQFilterType) {
@@ -195,6 +356,7 @@ final class OpenEQViewModel {
         bands[index].filterType = filterType
         commitActiveBandsAsCustom()
         audioEngineController.updateBand(bands[index])
+        updateExternalLoopbackEQIfNeeded()
     }
 
     func updateBandEnabled(index: Int, isEnabled: Bool) {
@@ -202,20 +364,51 @@ final class OpenEQViewModel {
         bands[index].isEnabled = isEnabled
         commitActiveBandsAsCustom()
         audioEngineController.updateBand(bands[index])
+        updateExternalLoopbackEQIfNeeded()
     }
 
     func updatePreamp(gain: Float) {
         preamp = gain
         audioEngineController.setPreampGain(gain)
         selectedPreset = EQPreset(name: "Custom", mode: eqMode, bands: bands, preamp: preamp)
+        updateExternalLoopbackEQIfNeeded()
+    }
+
+    func setEnabled(_ enabled: Bool) {
+        isEnabled = enabled
+        audioEngineController.setBypass(!enabled)
+        updateExternalLoopbackEQIfNeeded()
+    }
+
+    func setGraphicBandCount(_ count: GraphicBandCount) {
+        guard count != graphicBandCount, eqMode == .graphic else {
+            graphicBandCount = count
+            return
+        }
+
+        graphicBandCount = count
+        audioEngineController.currentGraphicBandCount = count
+        let newBands = EQBand.defaultBands(count: count)
+        bands = newBands
+        graphicBands = newBands
+        selectedPreset = EQPreset(name: "Custom", mode: eqMode, bands: bands, preamp: preamp)
+        audioEngineController.applyPreset(selectedPreset)
+        updateExternalLoopbackEQIfNeeded()
+    }
+
+    func toggleVolumeBoost() {
+        isVolumeBoostEnabled.toggle()
+        let boostValue: Double = isVolumeBoostEnabled ? 2.0 : 1.0
+        audioEngineController.setVolumeBoost(boostValue)
     }
 
     func resetEQ() {
-        bands = EQBand.defaultBands(for: eqMode)
+        bands = EQBand.defaultBands(for: eqMode, graphicBandCount: graphicBandCount)
         preamp = 0.0
         cacheActiveBands()
         selectedPreset = EQPreset(name: "Flat", mode: eqMode, bands: bands, preamp: preamp)
         audioEngineController.applyPreset(selectedPreset)
+        updateExternalLoopbackEQIfNeeded()
     }
 
     // MARK: - Preset Management
@@ -286,6 +479,7 @@ final class OpenEQViewModel {
         cacheActiveBands()
         preamp = preset.preamp
         audioEngineController.applyPreset(preset)
+        updateExternalLoopbackEQIfNeeded()
     }
 
     func selectPreset(_ preset: EQPreset) {
@@ -354,7 +548,7 @@ final class OpenEQViewModel {
     private func bandsForMode(_ mode: EQMode) -> [EQBand] {
         switch mode {
         case .graphic:
-            return graphicBands.isEmpty ? EQBand.defaultBands() : graphicBands
+            return graphicBands.isEmpty ? EQBand.defaultBands(count: graphicBandCount) : graphicBands
         case .parametric:
             return parametricBands.isEmpty ? EQBand.defaultParametricBands() : parametricBands
         }
@@ -363,6 +557,36 @@ final class OpenEQViewModel {
     private func commitActiveBandsAsCustom() {
         cacheActiveBands()
         selectedPreset = EQPreset(name: "Custom", mode: eqMode, bands: bands, preamp: preamp)
+    }
+
+    private func syncSystemAudioState() {
+        systemAudioMode = systemAudioManager.mode
+        systemAudioStatus = systemAudioManager.status
+        selectedSystemInputDevice = systemAudioManager.selectedInputDevice
+        selectedSystemOutputDevice = systemAudioManager.selectedOutputDevice
+        availableInputDevices = systemAudioManager.availableInputDevices
+        availableOutputDevices = systemAudioManager.availableOutputDevices
+        detectedBlackHoleDevice = systemAudioManager.detectedBlackHoleDevice
+        externalLoopbackLatency = systemAudioManager.externalLoopbackLatency
+        isExternalLoopbackBypassed = systemAudioManager.isExternalLoopbackBypassed
+    }
+
+    private func updateExternalLoopbackEQIfNeeded() {
+        guard systemAudioMode == .externalLoopback, systemAudioStatus == .running else {
+            return
+        }
+
+        systemAudioManager.updateExternalLoopbackEQ(currentLoopbackPreset())
+        syncSystemAudioState()
+    }
+
+    private func currentLoopbackPreset() -> EQPreset {
+        EQPreset(
+            name: selectedPreset.name,
+            mode: eqMode,
+            bands: bands,
+            preamp: min(preamp, 0.0)
+        )
     }
 }
 
