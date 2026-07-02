@@ -4,11 +4,10 @@ struct EqualizerView: View {
     @Bindable var viewModel: OpenEQViewModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Label("\(viewModel.eqMode.title) Equalizer", systemImage: "slider.vertical.3")
-                    .font(.headline)
-                    .foregroundStyle(.primary)
+                    .font(.subheadline.weight(.semibold))
 
                 Spacer()
 
@@ -16,8 +15,8 @@ struct EqualizerView: View {
                     Image(systemName: "power")
                 }
                 .toggleStyle(.switch)
+                .controlSize(.small)
                 .help("Toggle EQ on/off")
-                .padding(.trailing, 4)
 
                 Picker(
                     "EQ Mode",
@@ -31,7 +30,7 @@ struct EqualizerView: View {
                     }
                 }
                 .pickerStyle(.segmented)
-                .frame(width: 220)
+                .frame(width: 180)
 
                 if viewModel.eqMode == .graphic {
                     Picker("Bands", selection: bandCountBinding) {
@@ -40,15 +39,17 @@ struct EqualizerView: View {
                         }
                     }
                     .pickerStyle(.segmented)
-                    .frame(width: 140)
+                    .frame(width: 120)
                 }
 
                 Button(action: {
                     viewModel.resetEQ()
                 }) {
-                    Label("Reset EQ", systemImage: "arrow.counterclockwise")
+                    Label("Reset", systemImage: "arrow.counterclockwise")
+                        .font(.caption)
                 }
                 .buttonStyle(.bordered)
+                .controlSize(.small)
             }
 
             EQCurveView(
@@ -56,83 +57,18 @@ struct EqualizerView: View {
                 mode: viewModel.eqMode,
                 preamp: viewModel.preamp
             )
+            .frame(height: 120)
             .opacity(viewModel.isEnabled ? 1.0 : 0.4)
 
             if viewModel.eqMode == .graphic {
-                HStack(alignment: .center, spacing: 12) {
-                    VStack(spacing: 8) {
-                        Text(String(format: "%+.1f dB", viewModel.preamp))
-                            .font(.system(size: 10, weight: .bold, design: .monospaced))
-                            .foregroundStyle(viewModel.preamp == 0.0 ? Color.secondary : Color.orange)
-                            .frame(height: 14)
-
-                        GeometryReader { geometry in
-                            let height = geometry.size.height
-                            let thumbSize: CGFloat = 16
-                            let trackHeight = height - thumbSize
-
-                            let percent = CGFloat((viewModel.preamp - EQBand.gainRange.lowerBound) / (EQBand.gainRange.upperBound - EQBand.gainRange.lowerBound))
-                            let thumbY = trackHeight * (1.0 - percent)
-
-                            ZStack(alignment: .top) {
-                                RoundedRectangle(cornerRadius: 3)
-                                    .fill(Color.orange.opacity(0.12))
-                                    .frame(width: 4)
-                                    .frame(maxHeight: .infinity)
-
-                                Rectangle()
-                                    .fill(Color.orange.opacity(0.4))
-                                    .frame(width: 14, height: 1.5)
-                                    .offset(y: trackHeight / 2 + thumbSize / 2 - 0.75)
-
-                                Circle()
-                                    .fill(
-                                        LinearGradient(
-                                            colors: [.orange, .red],
-                                            startPoint: .top,
-                                            endPoint: .bottom
-                                        )
-                                    )
-                                    .frame(width: thumbSize, height: thumbSize)
-                                    .shadow(color: Color.orange.opacity(0.3), radius: 3)
-                                    .offset(y: thumbY)
-                                    .gesture(
-                                        DragGesture(minimumDistance: 0)
-                                            .onChanged { value in
-                                                let newY = min(max(0, value.location.y - thumbSize / 2), trackHeight)
-                                                let newPercent = 1.0 - (newY / trackHeight)
-                                                let rawPreamp = EQBand.gainRange.lowerBound + Float(newPercent) * (EQBand.gainRange.upperBound - EQBand.gainRange.lowerBound)
-
-                                                let snapped: Float
-                                                if abs(rawPreamp) < 0.4 {
-                                                    snapped = 0.0
-                                                } else {
-                                                    snapped = Float(round(rawPreamp * 2) / 2)
-                                                }
-                                                viewModel.updatePreamp(gain: snapped)
-                                            }
-                                    )
-                            }
-                        }
-                        .frame(width: 28, height: 160)
-
-                        Text("Preamp")
-                            .font(.system(size: 11, weight: .bold, design: .rounded))
-                            .foregroundStyle(.orange)
-                            .frame(width: 52)
-                    }
-                    .frame(width: 58)
-                    .onTapGesture(count: 2) {
-                        viewModel.updatePreamp(gain: 0.0)
-                    }
-                    .help("Double-click to reset preamp to 0.0 dB")
+                HStack(alignment: .center, spacing: 8) {
+                    preampControl
 
                     Divider()
-                        .frame(height: 160)
-                        .padding(.horizontal, 4)
+                        .frame(height: 120)
 
                     ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 4) {
+                        HStack(spacing: 2) {
                             ForEach(Array(viewModel.bands.enumerated()), id: \.element.id) { index, band in
                                 EQBandControl(
                                     band: band,
@@ -146,37 +82,75 @@ struct EqualizerView: View {
                         .padding(.horizontal, 4)
                     }
                 }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 8)
-                .background(
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(Color.primary.opacity(0.02))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12)
-                        .stroke(Color.primary.opacity(0.04), lineWidth: 1)
-                )
+                .padding(.vertical, 6)
+                .background(Color.primary.opacity(0.02))
+                .cornerRadius(8)
                 .opacity(viewModel.isEnabled ? 1.0 : 0.4)
             } else {
                 ParametricEQView(viewModel: viewModel)
                     .opacity(viewModel.isEnabled ? 1.0 : 0.4)
             }
         }
-        .padding(20)
+        .padding(14)
+    }
+
+    private var preampControl: some View {
+        VStack(spacing: 6) {
+            Text(String(format: "%+.1f dB", viewModel.preamp))
+                .font(.system(size: 9, weight: .bold, design: .monospaced))
+                .foregroundStyle(viewModel.preamp == 0.0 ? Color.secondary : Color.orange)
+                .frame(height: 12)
+
+            GeometryReader { geometry in
+                let height = geometry.size.height
+                let thumbSize: CGFloat = 14
+                let trackHeight = height - thumbSize
+
+                let percent = CGFloat((viewModel.preamp - EQBand.gainRange.lowerBound) / (EQBand.gainRange.upperBound - EQBand.gainRange.lowerBound))
+                let thumbY = trackHeight * (1.0 - percent)
+
+                ZStack(alignment: .top) {
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(Color.orange.opacity(0.12))
+                        .frame(width: 3)
+
+                    Rectangle()
+                        .fill(Color.orange.opacity(0.4))
+                        .frame(width: 12, height: 1.5)
+                        .offset(y: trackHeight / 2 + thumbSize / 2 - 0.75)
+
+                    Circle()
+                        .fill(LinearGradient(colors: [.orange, .red], startPoint: .top, endPoint: .bottom))
+                        .frame(width: thumbSize, height: thumbSize)
+                        .shadow(color: Color.orange.opacity(0.3), radius: 2)
+                        .offset(y: thumbY)
+                        .gesture(
+                            DragGesture(minimumDistance: 0)
+                                .onChanged { value in
+                                    let newY = min(max(0, value.location.y - thumbSize / 2), trackHeight)
+                                    let newPercent = 1.0 - (newY / trackHeight)
+                                    let rawPreamp = EQBand.gainRange.lowerBound + Float(newPercent) * (EQBand.gainRange.upperBound - EQBand.gainRange.lowerBound)
+                                    viewModel.updatePreamp(gain: abs(rawPreamp) < 0.4 ? 0.0 : Float(round(rawPreamp * 2) / 2))
+                                }
+                        )
+                }
+            }
+            .frame(width: 22, height: 120)
+
+            Text("Preamp")
+                .font(.system(size: 9, weight: .bold, design: .rounded))
+                .foregroundStyle(.orange)
+        }
+        .frame(width: 48)
+        .onTapGesture(count: 2) { viewModel.updatePreamp(gain: 0.0) }
     }
 
     private var eqBinding: Binding<Bool> {
-        Binding(
-            get: { viewModel.isEnabled },
-            set: { viewModel.setEnabled($0) }
-        )
+        Binding(get: { viewModel.isEnabled }, set: { viewModel.setEnabled($0) })
     }
 
     private var bandCountBinding: Binding<GraphicBandCount> {
-        Binding(
-            get: { viewModel.graphicBandCount },
-            set: { viewModel.setGraphicBandCount($0) }
-        )
+        Binding(get: { viewModel.graphicBandCount }, set: { viewModel.setGraphicBandCount($0) })
     }
 }
 
@@ -189,57 +163,39 @@ struct EQBandControl: View {
     @State private var isDragging = false
 
     var body: some View {
-        VStack(spacing: 8) {
-            Text(String(format: "%+.1f dB", gain))
-                .font(.system(size: 9, weight: .medium, design: .monospaced))
+        VStack(spacing: 6) {
+            Text(String(format: "%+.1f", gain))
+                .font(.system(size: 8, weight: .medium, design: .monospaced))
                 .foregroundStyle(gain == 0.0 ? Color.secondary : (gain > 0 ? Color.green : Color.red))
-                .frame(height: 12)
+                .frame(height: 10)
 
             GeometryReader { geometry in
                 let height = geometry.size.height
-                let thumbSize: CGFloat = 14
+                let thumbSize: CGFloat = 12
                 let trackHeight = height - thumbSize
-
                 let minGain = EQBand.gainRange.lowerBound
                 let maxGain = EQBand.gainRange.upperBound
                 let percent = CGFloat((gain - minGain) / (maxGain - minGain))
                 let thumbY = trackHeight * (1.0 - percent)
 
                 ZStack(alignment: .top) {
-                    RoundedRectangle(cornerRadius: 3)
-                        .fill(Color.primary.opacity(0.1))
-                        .frame(width: 4)
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(Color.primary.opacity(0.08))
+                        .frame(width: 3)
                         .frame(maxHeight: .infinity)
 
                     Rectangle()
-                        .fill(Color.primary.opacity(0.35))
-                        .frame(width: 12, height: 1.5)
-                        .offset(y: trackHeight / 2 + thumbSize / 2 - 0.75)
-
-                    Rectangle()
-                        .fill(Color.primary.opacity(0.18))
-                        .frame(width: 8, height: 1)
-                        .offset(y: trackHeight * 0.25 + thumbSize / 2)
-
-                    Rectangle()
-                        .fill(Color.primary.opacity(0.18))
-                        .frame(width: 8, height: 1)
-                        .offset(y: trackHeight * 0.75 + thumbSize / 2)
+                        .fill(Color.primary.opacity(0.3))
+                        .frame(width: 10, height: 1)
+                        .offset(y: trackHeight / 2 + thumbSize / 2 - 0.5)
 
                     Circle()
-                        .fill(
-                            LinearGradient(
-                                colors: isDragging ? [.cyan, .blue] : [Color(nsColor: .controlColor), Color(nsColor: .alternateSelectedControlTextColor)],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                        )
-                        .overlay(
-                            Circle()
-                                .stroke(isDragging ? Color.blue : Color.primary.opacity(0.35), lineWidth: 1)
-                        )
-                        .shadow(color: Color.black.opacity(0.2), radius: 2, y: 1)
-                        .shadow(color: isHovered || isDragging ? Color.cyan.opacity(0.4) : Color.clear, radius: 4)
+                        .fill(LinearGradient(
+                            colors: isDragging ? [.cyan, .blue] : [Color(nsColor: .controlColor), Color(nsColor: .alternateSelectedControlTextColor)],
+                            startPoint: .top, endPoint: .bottom
+                        ))
+                        .overlay(Circle().stroke(isDragging ? Color.blue : Color.primary.opacity(0.3), lineWidth: 1))
+                        .shadow(color: Color.black.opacity(0.15), radius: 1, y: 1)
                         .frame(width: thumbSize, height: thumbSize)
                         .offset(y: thumbY)
                         .gesture(
@@ -249,35 +205,22 @@ struct EQBandControl: View {
                                     let newY = min(max(0, value.location.y - thumbSize / 2), trackHeight)
                                     let newPercent = 1.0 - (newY / trackHeight)
                                     let rawGain = minGain + Float(newPercent) * (maxGain - minGain)
-                                    let snappedGain: Float
-                                    if abs(rawGain) < 0.4 {
-                                        snappedGain = 0.0
-                                    } else {
-                                        snappedGain = Float(round(rawGain * 2) / 2)
-                                    }
-                                    onGainChanged(snappedGain)
+                                    onGainChanged(abs(rawGain) < 0.4 ? 0.0 : Float(round(rawGain * 2) / 2))
                                 }
-                                .onEnded { _ in
-                                    isDragging = false
-                                }
+                                .onEnded { _ in isDragging = false }
                         )
                 }
             }
-            .frame(width: 24, height: 160)
+            .frame(width: 20, height: 120)
 
             Text(band.label)
-                .font(.system(size: 9, weight: .semibold, design: .rounded))
+                .font(.system(size: 8, weight: .semibold, design: .rounded))
                 .foregroundStyle(.primary)
-                .frame(width: 48)
+                .frame(width: 40)
         }
-        .frame(width: 50)
-        .onHover { hovering in
-            isHovered = hovering
-        }
-        .onTapGesture(count: 2) {
-            onGainChanged(0.0)
-        }
-        .help("Double-click to reset band to 0.0 dB")
+        .frame(width: 42)
+        .onHover { isHovered = $0 }
+        .onTapGesture(count: 2) { onGainChanged(0.0) }
     }
 }
 
@@ -285,5 +228,5 @@ struct EQBandControl: View {
     EqualizerView(
         viewModel: OpenEQViewModel(audioEngineController: AudioEngineController())
     )
-    .frame(width: 984, height: 312)
+    .frame(width: 984, height: 280)
 }

@@ -7,78 +7,53 @@ struct PlayerControlsView: View {
     @State private var currentTime: Double = 0.0
     private let totalDuration: Double = 214.0
     @State private var rotationAngle: Double = 0.0
-
     private let timer = Timer.publish(every: 0.1, on: .main, in: .common).autoconnect()
 
     var body: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 0) {
             if let error = viewModel.errorMessage {
-                HStack(spacing: 8) {
+                HStack(spacing: 6) {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .foregroundStyle(.red)
-
+                        .font(.caption)
                     Text(error)
                         .font(.caption)
                         .foregroundStyle(.red)
-
                     Spacer()
-
-                    Button(action: {
-                        viewModel.errorMessage = nil
-                    }) {
+                    Button(action: { viewModel.errorMessage = nil }) {
                         Image(systemName: "xmark.circle.fill")
                             .foregroundStyle(.secondary)
                     }
                     .buttonStyle(.plain)
                 }
                 .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(Color.red.opacity(0.12))
-                .cornerRadius(6)
-                .padding(.horizontal, 20)
-                .padding(.top, 4)
+                .padding(.vertical, 4)
+                .background(Color.red.opacity(0.1))
             }
 
-            HStack(spacing: 24) {
-                HStack(spacing: 12) {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(Color.primary.opacity(0.05))
-                            .frame(width: 44, height: 44)
+            HStack(spacing: 16) {
+                HStack(spacing: 8) {
+                    Image(systemName: "music.note")
+                        .font(.caption)
+                        .foregroundStyle(viewModel.selectedFileURL != nil ? Color.accentColor : Color.secondary)
+                        .frame(width: 24, height: 24)
+                        .background(Color.primary.opacity(0.05))
+                        .cornerRadius(4)
 
-                        Image(systemName: "music.note")
-                            .font(.title2)
-                            .foregroundStyle(viewModel.selectedFileURL != nil ? Color.accentColor : Color.secondary)
-                            .rotationEffect(.degrees(rotationAngle))
-                            .animation(.linear(duration: 0.1), value: rotationAngle)
-                    }
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(viewModel.selectedFileName)
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.primary)
-                            .lineLimit(1)
-
-                        Text(viewModel.selectedFileURL != nil ? "Local Audio File" : "No File Loaded")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                    .frame(width: 140, alignment: .leading)
+                    Text(viewModel.selectedFileName)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                        .frame(width: 120, alignment: .leading)
                 }
 
-                Divider()
-                    .frame(height: 32)
-
-                HStack(spacing: 8) {
-                    Button(action: {
-                        viewModel.openAudioFile()
-                    }) {
-                        Label("Open Audio", systemImage: "doc.badge.plus")
-                            .font(.subheadline)
+                HStack(spacing: 4) {
+                    Button(action: { viewModel.openAudioFile() }) {
+                        Image(systemName: "doc.badge.plus")
+                            .font(.caption)
                     }
                     .buttonStyle(.bordered)
-                    .help("Open Audio File...")
+                    .controlSize(.small)
 
                     Button(action: {
                         viewModel.stop()
@@ -86,103 +61,85 @@ struct PlayerControlsView: View {
                         rotationAngle = 0.0
                     }) {
                         Image(systemName: "stop.fill")
-                            .font(.body)
+                            .font(.caption)
                     }
                     .buttonStyle(.bordered)
+                    .controlSize(.small)
                     .disabled(viewModel.selectedFileURL == nil)
-                    .help("Stop")
 
-                    Button(action: {
-                        viewModel.play()
-                    }) {
+                    Button(action: { viewModel.play() }) {
                         Image(systemName: "play.fill")
-                            .font(.body.weight(.bold))
-                            .frame(width: 12)
+                            .font(.caption)
+                            .frame(width: 8)
                     }
                     .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
                     .disabled(viewModel.selectedFileURL == nil)
-                    .help("Play")
 
-                    Button(action: {
-                        viewModel.pause()
-                    }) {
+                    Button(action: { viewModel.pause() }) {
                         Image(systemName: "pause.fill")
-                            .font(.body.weight(.bold))
-                            .frame(width: 12)
+                            .font(.caption)
+                            .frame(width: 8)
                     }
                     .buttonStyle(.bordered)
+                    .controlSize(.small)
                     .disabled(viewModel.selectedFileURL == nil)
-                    .help("Pause")
                 }
 
-                HStack(spacing: 10) {
+                HStack(spacing: 6) {
                     Text(formatTime(currentTime))
-                        .font(.caption.monospacedDigit())
+                        .font(.caption2.monospacedDigit())
                         .foregroundStyle(.secondary)
-                        .frame(width: 38)
+                        .frame(width: 32)
 
-                    Slider(
-                        value: Binding(
-                            get: { currentTime },
-                            set: { currentTime = $0 }
-                        ),
-                        in: 0...totalDuration
-                    )
-                    .disabled(viewModel.selectedFileURL == nil)
-                    .frame(maxWidth: .infinity)
+                    Slider(value: Binding(get: { currentTime }, set: { currentTime = $0 }), in: 0...totalDuration)
+                        .disabled(viewModel.selectedFileURL == nil)
+                        .controlSize(.small)
 
                     Text(formatTime(totalDuration))
-                        .font(.caption.monospacedDigit())
+                        .font(.caption2.monospacedDigit())
                         .foregroundStyle(.secondary)
-                        .frame(width: 38)
+                        .frame(width: 32)
                 }
 
                 Divider()
-                    .frame(height: 32)
+                    .frame(height: 24)
 
-                HStack(spacing: 10) {
-                    Button(action: {
-                        viewModel.isMuted.toggle()
-                    }) {
+                HStack(spacing: 6) {
+                    Button(action: { viewModel.isMuted.toggle() }) {
                         Image(systemName: volumeIcon)
-                            .font(.body)
+                            .font(.caption)
                             .foregroundStyle(viewModel.isMuted ? .red : .secondary)
-                            .frame(width: 18)
+                            .frame(width: 14)
                     }
                     .buttonStyle(.plain)
-                    .help(viewModel.isMuted ? "Unmute" : "Mute")
 
                     Slider(
                         value: Binding(
                             get: { viewModel.isMuted ? 0.0 : viewModel.volume },
-                            set: {
-                                viewModel.volume = $0
-                                if viewModel.isMuted {
-                                    viewModel.isMuted = false
-                                }
-                            }
+                            set: { viewModel.volume = $0; if viewModel.isMuted { viewModel.isMuted = false } }
                         ),
                         in: 0...(viewModel.isVolumeBoostEnabled ? 2.0 : 1.0)
                     )
-                    .frame(width: 110)
+                    .controlSize(.small)
+                    .frame(width: 80)
 
                     Text("\(Int((viewModel.isMuted ? 0.0 : viewModel.volume) * 100))%")
-                        .font(.caption.monospacedDigit())
+                        .font(.caption2.monospacedDigit())
                         .foregroundStyle(.secondary)
-                        .frame(width: 32, alignment: .trailing)
+                        .frame(width: 28, alignment: .trailing)
 
-                    Button(action: {
-                        viewModel.toggleVolumeBoost()
-                    }) {
+                    Button(action: { viewModel.toggleVolumeBoost() }) {
                         Image(systemName: viewModel.isVolumeBoostEnabled ? "bolt.fill" : "bolt")
+                            .font(.caption)
                             .foregroundStyle(viewModel.isVolumeBoostEnabled ? .yellow : .secondary)
                     }
                     .buttonStyle(.plain)
-                    .help(viewModel.isVolumeBoostEnabled ? "Volume Boost ON (200%)" : "Volume Boost OFF")
+                    .help(viewModel.isVolumeBoostEnabled ? "200% Boost ON" : "Volume Boost OFF")
                 }
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 12)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
         }
         .background(Color(nsColor: .controlBackgroundColor))
         .onReceive(timer) { _ in
@@ -194,15 +151,10 @@ struct PlayerControlsView: View {
     }
 
     private var volumeIcon: String {
-        if viewModel.isMuted || viewModel.volume == 0 {
-            return "speaker.slash.fill"
-        } else if viewModel.volume < 0.33 {
-            return "speaker.wave.1.fill"
-        } else if viewModel.volume < 0.67 {
-            return "speaker.wave.2.fill"
-        } else {
-            return "speaker.wave.3.fill"
-        }
+        if viewModel.isMuted || viewModel.volume == 0 { return "speaker.slash.fill" }
+        else if viewModel.volume < 0.33 { return "speaker.wave.1.fill" }
+        else if viewModel.volume < 0.67 { return "speaker.wave.2.fill" }
+        else { return "speaker.wave.3.fill" }
     }
 
     private func formatTime(_ seconds: Double) -> String {

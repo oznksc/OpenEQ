@@ -1,10 +1,3 @@
-//
-//  SpectrumView.swift
-//  OpenEQ
-//
-//  Created by Ozan
-//
-
 import SwiftUI
 
 struct SpectrumView: View {
@@ -15,17 +8,15 @@ struct SpectrumView: View {
     let rightLevel: Float
     let peakLevel: Float
     let isClipping: Bool
-    
+
     @State private var peakLevels: [Float] = Array(repeating: 0.0, count: SpectrumAnalyzer.barCount)
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            // Header
-            HStack(spacing: 12) {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
                 Label(title, systemImage: "chart.bar.xaxis")
-                    .font(.headline)
-                    .foregroundStyle(.primary)
-                
+                    .font(.subheadline.weight(.semibold))
+
                 Spacer()
 
                 LevelMeterView(
@@ -35,42 +26,31 @@ struct SpectrumView: View {
                 )
 
                 ClippingIndicatorView(isClipping: isClipping)
-                
-                Text("64 Bands (vDSP Transform)")
-                    .font(.caption.monospaced())
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(Color.primary.opacity(0.05))
-                    .cornerRadius(4)
             }
 
             if let warning {
                 HStack(spacing: 6) {
                     Image(systemName: "info.circle")
                         .foregroundStyle(.secondary)
-
                     Text(warning)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
                 .background(Color.primary.opacity(0.04))
                 .clipShape(RoundedRectangle(cornerRadius: 6))
             }
 
-            // High Performance GPU-Accelerated Canvas Rendering
             GeometryReader { proxy in
                 Canvas { context, size in
                     let barCount = levels.count
                     guard barCount > 0 else { return }
-                    
-                    let spacing: CGFloat = 2.0
+
+                    let spacing: CGFloat = 1.5
                     let totalSpacing = spacing * CGFloat(barCount - 1)
                     let barWidth = (size.width - totalSpacing) / CGFloat(barCount)
-                    
-                    // Draw horizontal decibel grids
+
                     for i in 1...3 {
                         let y = size.height * CGFloat(i) * 0.25
                         var path = Path()
@@ -79,106 +59,79 @@ struct SpectrumView: View {
                         context.stroke(path, with: .color(Color.primary.opacity(0.04)), lineWidth: 1)
                     }
 
-                    // Render spectrum faders and peak hold points
                     for index in 0..<barCount {
                         let level = levels[index]
                         let peakLevel = index < peakLevels.count ? peakLevels[index] : level
-                        
                         let x = CGFloat(index) * (barWidth + spacing)
-                        
-                        // Main Bar
                         let barHeight = max(1.0, size.height * CGFloat(level))
                         let barRect = CGRect(x: x, y: size.height - barHeight, width: barWidth, height: barHeight)
-                        
+
                         let gradient = GraphicsContext.Shading.linearGradient(
-                            Gradient(colors: [
-                                Color.cyan.opacity(0.95),
-                                Color.blue.opacity(0.85),
-                                Color.purple.opacity(0.75)
-                            ]),
+                            Gradient(colors: [.cyan.opacity(0.95), .blue.opacity(0.85), .purple.opacity(0.75)]),
                             startPoint: CGPoint(x: 0, y: size.height),
                             endPoint: CGPoint(x: 0, y: 0)
                         )
-                        
-                        let barPath = Path(roundedRect: barRect, cornerRadius: 1)
-                        context.fill(barPath, with: gradient)
-                        
-                        // Peak Hold Point (decaying dot)
+
+                        context.fill(Path(roundedRect: barRect, cornerRadius: 1), with: gradient)
+
                         let peakY = size.height - max(1.0, size.height * CGFloat(peakLevel))
-                        let peakPath = Path(CGRect(x: x, y: peakY - 1, width: barWidth, height: 2))
-                        context.fill(peakPath, with: .color(Color.teal.opacity(0.9)))
+                        context.fill(Path(CGRect(x: x, y: peakY - 1, width: barWidth, height: 2)), with: .color(Color.teal.opacity(0.9)))
                     }
                 }
-                .background(
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(Color(nsColor: .textBackgroundColor))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12)
-                        .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-                )
+                .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: .textBackgroundColor)))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.primary.opacity(0.06), lineWidth: 1))
                 .overlay(
                     Group {
-                        // Show a beautiful empty state if no active signals are present
                         if !levels.contains(where: { $0 > 0.025 }) {
-                            VStack(spacing: 8) {
+                            VStack(spacing: 6) {
                                 Image(systemName: "music.note.house")
-                                    .font(.system(size: 32))
+                                    .font(.system(size: 24))
                                     .foregroundStyle(.secondary.opacity(0.7))
-                                
-                                Text("No Audio Source Loaded")
+                                Text("No Audio Source")
                                     .font(.subheadline.weight(.semibold))
                                     .foregroundStyle(.primary.opacity(0.8))
-                                
-                                Text("Press ⌘O or click 'Open Audio' to load a file")
+                                Text("Press ⌘O or click 'Open Audio'")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                             .background(Color(nsColor: .textBackgroundColor).opacity(0.96))
-                            .cornerRadius(12)
+                            .cornerRadius(8)
                         }
                     }
                 )
             }
-            .frame(minHeight: 200)
-            
-            // X-Axis Frequencies
+
             HStack {
-                Text("20 Hz").frame(width: 44, alignment: .leading)
+                Text("20 Hz").font(.system(size: 9, weight: .medium, design: .monospaced)).foregroundStyle(.secondary)
                 Spacer()
-                Text("250 Hz").frame(width: 50, alignment: .center)
+                Text("250 Hz").font(.system(size: 9, weight: .medium, design: .monospaced)).foregroundStyle(.secondary)
                 Spacer()
-                Text("1 kHz").frame(width: 44, alignment: .center)
+                Text("1 kHz").font(.system(size: 9, weight: .medium, design: .monospaced)).foregroundStyle(.secondary)
                 Spacer()
-                Text("4 kHz").frame(width: 44, alignment: .center)
+                Text("4 kHz").font(.system(size: 9, weight: .medium, design: .monospaced)).foregroundStyle(.secondary)
                 Spacer()
-                Text("20 kHz").frame(width: 50, alignment: .trailing)
+                Text("20 kHz").font(.system(size: 9, weight: .medium, design: .monospaced)).foregroundStyle(.secondary)
             }
-            .font(.system(size: 10, weight: .medium, design: .monospaced))
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 10)
+            .padding(.horizontal, 8)
         }
-        .padding(20)
+        .padding(12)
         .onChange(of: levels) { _, newValue in
             updatePeaks(with: newValue)
         }
     }
-    
+
     private func updatePeaks(with currentLevels: [Float]) {
         if peakLevels.count != currentLevels.count {
             peakLevels = currentLevels
             return
         }
-        
         for i in 0..<currentLevels.count {
             let current = currentLevels[i]
             let existing = peakLevels[i]
-            
             if current >= existing {
                 peakLevels[i] = current
             } else {
-                // Smooth physical decay
                 peakLevels[i] = max(0.0, existing - 0.035)
             }
         }
@@ -187,13 +140,10 @@ struct SpectrumView: View {
 
 #Preview {
     SpectrumView(
-        title: "System Audio Monitor",
-        warning: "Monitor mode analyzes system audio only. It does not apply EQ to system output.",
+        title: "Real-Time FFT Spectrum",
+        warning: nil,
         levels: Array(repeating: 0.35, count: SpectrumAnalyzer.barCount),
-        leftLevel: 0.62,
-        rightLevel: 0.58,
-        peakLevel: 0.62,
-        isClipping: false
+        leftLevel: 0.62, rightLevel: 0.58, peakLevel: 0.62, isClipping: false
     )
-        .frame(width: 984, height: 384)
+    .frame(height: 260)
 }

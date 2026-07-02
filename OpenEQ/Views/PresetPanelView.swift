@@ -1,10 +1,3 @@
-//
-//  PresetPanelView.swift
-//  OpenEQ
-//
-//  Created by Ozan
-//
-
 import SwiftUI
 
 struct PresetPanelView: View {
@@ -14,73 +7,54 @@ struct PresetPanelView: View {
     @State private var hoveredPresetId: UUID? = nil
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            // Header
-            Label("Presets Manager", systemImage: "slider.horizontal.below.rectangle")
-                .font(.headline)
-                .foregroundStyle(.primary)
+        VStack(alignment: .leading, spacing: 12) {
+            Label("Presets", systemImage: "slider.horizontal.below.rectangle")
+                .font(.subheadline.weight(.semibold))
 
-            // Preset Saving Form
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Save Current EQ State")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                
-                HStack(spacing: 8) {
-                    TextField("New Preset Name...", text: $newPresetName)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(maxWidth: .infinity)
-                    
-                    Button(action: savePreset) {
-                        Image(systemName: "plus")
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .help("Save current bands to preset")
-                    .disabled(newPresetName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            HStack(spacing: 6) {
+                TextField("New preset...", text: $newPresetName)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.caption)
+
+                Button(action: savePreset) {
+                    Image(systemName: "plus")
+                        .font(.caption)
                 }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .disabled(newPresetName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
-            .padding(10)
-            .background(Color.primary.opacity(0.03))
-            .cornerRadius(8)
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(Color.primary.opacity(0.06), lineWidth: 1)
-            )
 
-            // Presets List
             ScrollView(.vertical, showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 14) {
-                    
-                    // SECTION: Built-in Presets
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("BUILT-IN PRESETS")
-                            .font(.system(size: 10, weight: .bold))
+                VStack(alignment: .leading, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("BUILT-IN")
+                            .font(.system(size: 9, weight: .bold))
                             .foregroundStyle(.secondary)
                             .padding(.leading, 4)
-                        
+
                         ForEach(viewModel.presets.filter { preset in
                             EQPreset.defaultPresets().contains(where: { $0.id == preset.id })
                         }) { preset in
                             presetRow(preset: preset, isCustom: false)
                         }
                     }
-                    
-                    // SECTION: Custom User Presets
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("USER PRESETS")
-                            .font(.system(size: 10, weight: .bold))
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("USER")
+                            .font(.system(size: 9, weight: .bold))
                             .foregroundStyle(.secondary)
                             .padding(.leading, 4)
-                        
+
                         let customPresets = viewModel.presets.filter { preset in
                             !EQPreset.defaultPresets().contains(where: { $0.id == preset.id })
                         }
-                        
+
                         if customPresets.isEmpty {
-                            Text("No custom presets yet")
+                            Text("No custom presets")
                                 .font(.caption)
                                 .foregroundStyle(.secondary.opacity(0.7))
-                                .padding(.leading, 12)
+                                .padding(.leading, 8)
                                 .padding(.vertical, 4)
                         } else {
                             ForEach(customPresets) { preset in
@@ -91,105 +65,82 @@ struct PresetPanelView: View {
                 }
             }
 
-            Divider()
-
-            // Bottom Actions (Import/Export Interface)
-            HStack(spacing: 12) {
-                Button(action: {
-                    viewModel.importPreset()
-                }) {
+            HStack(spacing: 8) {
+                Button(action: { viewModel.importPreset() }) {
                     Label("Import", systemImage: "square.and.arrow.down")
+                        .font(.caption)
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
-                .help("Import preset from JSON")
-                
-                Button(action: {
-                    viewModel.exportPreset(viewModel.selectedPreset)
-                }) {
-                    Label("Export Active", systemImage: "square.and.arrow.up")
+                .controlSize(.small)
+
+                Button(action: { viewModel.exportPreset(viewModel.selectedPreset) }) {
+                    Label("Export", systemImage: "square.and.arrow.up")
+                        .font(.caption)
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
-                .help("Export currently active preset to JSON")
+                .controlSize(.small)
             }
         }
-        .padding(20)
+        .padding(14)
         .background(Color(nsColor: .controlBackgroundColor))
     }
 
-    // MARK: - Reusable Preset List Row
     @ViewBuilder
     private func presetRow(preset: EQPreset, isCustom: Bool) -> some View {
         let isSelected = preset.id == viewModel.selectedPreset.id
-        
+
         HStack {
-            Button(action: {
-                viewModel.applyPreset(preset)
-            }) {
-                HStack(spacing: 8) {
+            Button(action: { viewModel.applyPreset(preset) }) {
+                HStack(spacing: 6) {
                     Image(systemName: isCustom ? "person.circle.fill" : "music.note")
                         .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
-                        .font(.system(size: 11))
-                    
+                        .font(.system(size: 10))
+
                     Text(preset.name)
-                        .font(.callout.weight(isSelected ? .semibold : .regular))
+                        .font(.caption.weight(isSelected ? .semibold : .regular))
                         .foregroundStyle(isSelected ? .primary : .secondary)
                         .lineLimit(1)
-                    
+
                     Spacer()
-                    
+
                     if isSelected {
                         Image(systemName: "checkmark")
-                            .font(.caption.weight(.bold))
+                            .font(.caption2.weight(.bold))
                             .foregroundStyle(.tint)
                     }
                 }
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            
-            // Actions for custom presets: Export & Delete
+
             if isCustom {
-                HStack(spacing: 6) {
-                    Button(action: {
-                        viewModel.exportPreset(preset)
-                    }) {
+                HStack(spacing: 4) {
+                    Button(action: { viewModel.exportPreset(preset) }) {
                         Image(systemName: "square.and.arrow.up")
-                            .font(.system(size: 10))
+                            .font(.system(size: 9))
                             .foregroundStyle(.secondary)
                     }
                     .buttonStyle(.plain)
-                    .help("Export preset")
-                    
-                    Button(action: {
-                        viewModel.deletePreset(id: preset.id)
-                    }) {
+
+                    Button(action: { viewModel.deletePreset(id: preset.id) }) {
                         Image(systemName: "trash")
-                            .font(.system(size: 10))
+                            .font(.system(size: 9))
                             .foregroundStyle(hoveredPresetId == preset.id ? Color.red : Color.secondary.opacity(0.6))
                     }
                     .buttonStyle(.plain)
-                    .help("Delete custom preset")
                 }
             }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
         .background(
-            RoundedRectangle(cornerRadius: 6)
-                .fill(isSelected ? Color.accentColor.opacity(0.12) : Color.clear)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 6)
-                .stroke(isSelected ? Color.accentColor.opacity(0.24) : Color.clear, lineWidth: 1)
+            RoundedRectangle(cornerRadius: 5)
+                .fill(isSelected ? Color.accentColor.opacity(0.1) : Color.clear)
         )
         .onHover { hovering in
-            if hovering {
-                hoveredPresetId = preset.id
-            } else if hoveredPresetId == preset.id {
-                hoveredPresetId = nil
-            }
+            hoveredPresetId = hovering ? preset.id : (hoveredPresetId == preset.id ? nil : hoveredPresetId)
         }
     }
 
@@ -205,5 +156,5 @@ struct PresetPanelView: View {
     PresetPanelView(
         viewModel: OpenEQViewModel(audioEngineController: AudioEngineController())
     )
-    .frame(width: 312, height: 720)
+    .frame(width: 280, height: 500)
 }

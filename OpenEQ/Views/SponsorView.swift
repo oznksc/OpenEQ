@@ -5,10 +5,9 @@ struct SponsorView: View {
 
     var body: some View {
         let activeSponsors = sponsors.filter(\.isActive)
-        let hasSponsors = !activeSponsors.isEmpty
 
-        VStack(alignment: .leading, spacing: 10) {
-            if hasSponsors {
+        VStack(alignment: .leading, spacing: 8) {
+            if !activeSponsors.isEmpty {
                 Label("Sponsors", systemImage: "heart.fill")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
@@ -23,20 +22,30 @@ struct SponsorView: View {
                 }
             }
 
-            supportLinks
+            VStack(spacing: 4) {
+                Link(destination: URL(string: "https://github.com/sponsors")!) {
+                    Label("Sponsor on GitHub", systemImage: "heart.fill")
+                        .font(.caption2)
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+
+                Link(destination: URL(string: "https://github.com/ozan/OpenEQ")!) {
+                    Label("Star on GitHub", systemImage: "star.fill")
+                        .font(.caption2)
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
         }
-        .padding(12)
-        .background(Color.primary.opacity(0.02))
-        .cornerRadius(10)
     }
 
     private func sponsorRow(_ sponsor: Sponsor) -> some View {
         Group {
             if let url = sponsor.websiteURL.flatMap(URL.init) {
-                Link(destination: url) {
-                    sponsorContent(sponsor)
-                }
-                .buttonStyle(.plain)
+                Link(destination: url) { sponsorContent(sponsor) }.buttonStyle(.plain)
             } else {
                 sponsorContent(sponsor)
             }
@@ -44,19 +53,18 @@ struct SponsorView: View {
     }
 
     private func sponsorContent(_ sponsor: Sponsor) -> some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 6) {
             Image(systemName: sponsor.imageName ?? "building.2.fill")
-                .font(.title3)
+                .font(.caption)
                 .foregroundStyle(tierColor(sponsor.tier))
 
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: 0) {
                 Text(sponsor.name)
-                    .font(.caption.weight(.semibold))
+                    .font(.caption2.weight(.semibold))
                     .foregroundStyle(.primary)
-
                 if let tagline = sponsor.tagline {
                     Text(tagline)
-                        .font(.caption2)
+                        .font(.system(size: 8))
                         .foregroundStyle(.secondary)
                 }
             }
@@ -64,50 +72,25 @@ struct SponsorView: View {
             Spacer()
 
             Text(sponsor.tier.rawValue)
-                .font(.system(size: 8, weight: .bold))
+                .font(.system(size: 7, weight: .bold))
                 .foregroundStyle(tierColor(sponsor.tier))
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
+                .padding(.horizontal, 4)
+                .padding(.vertical, 1)
                 .background(tierColor(sponsor.tier).opacity(0.15))
-                .clipShape(RoundedRectangle(cornerRadius: 4))
+                .clipShape(RoundedRectangle(cornerRadius: 3))
         }
-        .padding(.vertical, 4)
-    }
-
-    private var supportLinks: some View {
-        VStack(spacing: 6) {
-            Divider()
-
-            Link(destination: URL(string: "https://github.com/sponsors")!) {
-                Label("Sponsor on GitHub", systemImage: "heart.fill")
-                    .font(.caption.weight(.medium))
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.bordered)
-
-            Link(destination: URL(string: "https://github.com/ozan/OpenEQ")!) {
-                Label("Star on GitHub", systemImage: "star.fill")
-                    .font(.caption.weight(.medium))
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.bordered)
-        }
+        .padding(.vertical, 2)
     }
 
     private func tierColor(_ tier: Sponsor.SponsorTier) -> Color {
-        switch tier {
-        case .gold: return .yellow
-        case .silver: return .gray
-        case .bronze: return .orange
-        }
+        switch tier { case .gold: return .yellow; case .silver: return .gray; case .bronze: return .orange }
     }
 }
 
 #Preview {
     SponsorView(sponsors: [
         Sponsor(id: UUID(), name: "Example Corp", websiteURL: nil, imageName: "building.2.fill", tagline: "Making audio better", tier: .gold, isActive: true),
-        Sponsor(id: UUID(), name: "Test Inc", websiteURL: nil, imageName: "heart.circle.fill", tagline: "We love sound", tier: .silver, isActive: true),
     ])
-    .frame(width: 300)
+    .frame(width: 260)
     .padding()
 }
