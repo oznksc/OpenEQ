@@ -2,7 +2,7 @@
 //  AudioDeviceManager.swift
 //  OpenEQ
 //
-//  Created by Codex on 27.06.2026.
+//  Created by Ozan
 //
 
 import AudioToolbox

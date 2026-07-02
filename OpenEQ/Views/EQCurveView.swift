@@ -2,7 +2,7 @@
 //  EQCurveView.swift
 //  OpenEQ
 //
-//  Created by Codex on 26.06.2026.
+//  Created by Ozan
 //
 
 import SwiftUI

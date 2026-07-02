@@ -2,7 +2,7 @@
 //  MainWindowView.swift
 //  OpenEQ
 //
-//  Created by Gökmen on 26.06.2026.
+//  Created by Ozan
 //
 
 import SwiftUI

@@ -9,7 +9,8 @@ struct Sponsor: Identifiable, Codable {
     let tier: SponsorTier
     let isActive: Bool
 
-    enum SponsorTier: String, Codable, CaseIterable {
+    enum SponsorTier: String, Codable, CaseIterable, Identifiable {
+        var id: String { rawValue }
         case gold = "Gold"
         case silver = "Silver"
         case bronze = "Bronze"
