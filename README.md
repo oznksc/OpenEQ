@@ -2,21 +2,67 @@
 
 An open-source macOS audio equalizer application built with **SwiftUI**, **AVFoundation**, and **Accelerate (vDSP)**. OpenEQ provides a lightweight, performant desktop dashboard designed for audio adjustments, custom graphic equalization curves, and real-time audio analysis.
 
-## Key Features (MVP)
-* **10-Band Graphic Equalizer**: Precise audio frequency controls at standard intervals: `32, 64, 125, 250, 500, 1k, 2k, 4k, 8k, 16k` Hz.
-* **Independent Preamp Control**: Fine-tune volume levels with standard decibel mapping limits (`-24.0` to `+24.0` dB).
-* **Real-Time FFT Spectrum Analyzer**: Live visual feedback utilizing GPU-accelerated canvas rendering and vDSP Fourier Transform calculations (64 frequency bands).
-* **Presets Management**: Load factory audio templates (*Flat, Bass Boost, Vocal Clarity, Warm, Bright*) or save/delete custom user profiles.
-* **Import & Export**: Backup or share presets via native macOS JSON file handlers.
-* **Mac App Polish**: Integrated menu bar bindings, Keyboard Shortcuts (⌘O: Open Audio, Space: Play/Pause, ⌘R: Reset EQ), dark-mode styling, and physical peak decay indicators.
+## Features
+
+### Equalizer
+- **10-Band & 31-Band Graphic Equalizer**: Switchable between standard 10-band and professional 31-band ISO frequency intervals.
+- **5-Band Parametric EQ**: Configurable frequency, gain, Q factor, and filter types (parametric, low/high shelf, low/high pass).
+- **Independent Preamp Control**: Fine-tune volume levels with standard decibel mapping limits (`-24.0` to `+24.0` dB).
+- **EQ Bypass**: Instant toggle to compare processed vs unprocessed audio.
+- **Real-Time FFT Spectrum Analyzer**: 64-band spectrum visualization using GPU-accelerated Canvas rendering and vDSP Fourier Transform.
+
+### Audio Playback
+- Local audio file playback (MP3, WAV, AAC, CAF, AIFF) with EQ applied.
+- Playback controls: play, pause, stop, seek, volume, mute.
+- **Volume Booster**: Boost volume up to 200% beyond system limits.
+
+### Presets
+- 5 built-in presets: Flat, Bass Boost, Vocal Clarity, Warm, Bright.
+- Save/delete custom user presets.
+- Import/export presets as JSON files.
+
+### System Audio (Beta)
+- **Monitor Only**: Inspect system audio without processing.
+- **External Loopback**: Route system audio through EQ using a virtual audio device (e.g., BlackHole).
+- Real-time spectrum analysis of system audio.
+
+### Menu Bar Integration
+- Quick EQ toggle from the menu bar.
+- Preset switching and playback controls without opening the main window.
+
+### Keyboard Shortcuts
+| Shortcut | Action |
+|----------|--------|
+| `⌘O` | Open Audio File |
+| `⌘R` | Reset EQ |
+| `⌘B` | Toggle EQ Bypass |
+| `⌘⇧V` | Toggle Volume Boost |
+| `Space` | Play/Pause |
+
+## Sponsor
+
+OpenEQ is 100% free and open-source (MIT). If you find it useful, consider supporting the project:
+
+- [Sponsor on GitHub](https://github.com/sponsors) — Get your logo in the app!
+- [Star on GitHub](https://github.com/ozan/OpenEQ) — Helps others discover the project.
+
+### Current Sponsors
+
+> Be the first sponsor! Contact us to get your logo displayed here and in the app.
+
+| Tier | Perks |
+|------|-------|
+| **Gold** | Large logo in app + README, priority feature requests |
+| **Silver** | Medium logo in app + README |
+| **Bronze** | Small logo in README |
 
 ## Architecture Overview
 OpenEQ is structured around clean, modular boundaries:
-1. **SwiftUI Layer**: Responsive user interface including custom metal-cap faders and GPU-buffered spectrum canvas drawing.
+1. **SwiftUI Layer**: Responsive user interface including custom faders and GPU-buffered spectrum canvas drawing.
 2. **ViewModel Layer (MVVM)**: Observes playback states and manages UI interactions, data bindings, and user preferences persistence.
 3. **AudioCore Layer**: Interfaces with Apple's `AVAudioEngine`, establishing node graphs, parametric filters, volume multipliers, and output taps.
 4. **vDSP Spectrum Analyzer**: Executes windowing and Forward Discrete Fourier Transforms on captured buffer frames.
-5. **PresetStore Service**: Reads and writes configurations in JSON format under Application Support.
+5. **Services**: PresetStore (JSON-based preset persistence) and SponsorStore (sponsor configuration).
 
 For detailed design specifications, see [docs/architecture.md](docs/architecture.md).
 
@@ -31,7 +77,6 @@ For detailed design specifications, see [docs/architecture.md](docs/architecture
 3. Press `Cmd + B` to build or `Cmd + R` to run.
 
 ### Building via Terminal
-Run the following build command from the repository root:
 ```bash
 xcodebuild -scheme OpenEQ -destination 'platform=macOS' build
 ```
