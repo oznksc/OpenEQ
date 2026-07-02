@@ -9,8 +9,9 @@ struct OpenEQApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView(viewModel: viewModel)
-                .frame(minWidth: 1176, idealWidth: 1320, minHeight: 768, idealHeight: 864)
         }
+        .windowResizability(.contentMinSize)
+        .defaultSize(width: 1100, height: 700)
         .windowStyle(.titleBar)
         .commands {
             CommandGroup(replacing: .newItem) {
