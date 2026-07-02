@@ -2,7 +2,7 @@
 //  OpenEQTests.swift
 //  OpenEQTests
 //
-//  Created by Gökmen on 26.06.2026.
+//  Created by Ozan
 //
 
 import XCTest

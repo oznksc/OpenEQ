@@ -2,7 +2,7 @@
 //  PresetStorageService.swift
 //  OpenEQ
 //
-//  Created by Antigravity on 26.06.2026.
+//  Created by Ozan
 //
 
 import Foundation
