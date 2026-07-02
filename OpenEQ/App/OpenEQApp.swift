@@ -1,37 +1,59 @@
-//
-//  OpenEQApp.swift
-//  OpenEQ
-//
-//  Created by Gökmen on 26.06.2026.
-//
-
 import SwiftUI
 
 @main
 struct OpenEQApp: App {
+    @State private var viewModel = OpenEQViewModel(
+        audioEngineController: AudioEngineController()
+    )
+
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            ContentView(viewModel: viewModel)
                 .frame(minWidth: 1176, idealWidth: 1320, minHeight: 768, idealHeight: 864)
         }
         .windowStyle(.titleBar)
         .commands {
-            // Replace the New File command group
             CommandGroup(replacing: .newItem) {
                 Button("Open Audio...") {
                     NotificationCenter.default.post(name: .openAudioFile, object: nil)
                 }
                 .keyboardShortcut("o", modifiers: .command)
             }
-            
-            // Create a custom menu menu for Equalizer controls
+
             CommandMenu("Equalizer") {
                 Button("Reset EQ") {
-                    NotificationCenter.default.post(name: .resetEQ, object: nil)
+                    viewModel.resetEQ()
                 }
                 .keyboardShortcut("r", modifiers: .command)
+
+                Divider()
+
+                Button(viewModel.isEnabled ? "Disable EQ" : "Enable EQ") {
+                    viewModel.setEnabled(!viewModel.isEnabled)
+                }
+                .keyboardShortcut("b", modifiers: .command)
+
+                Button(viewModel.isVolumeBoostEnabled ? "Disable Volume Boost" : "Enable Volume Boost") {
+                    viewModel.toggleVolumeBoost()
+                }
+                .keyboardShortcut("v", modifiers: [.command, .shift])
+            }
+
+            CommandMenu("Presets") {
+                ForEach(viewModel.presets.prefix(5)) { preset in
+                    Button(preset.name) {
+                        viewModel.applyPreset(preset)
+                    }
+                }
             }
         }
+
+        MenuBarExtra {
+            MenuBarView(viewModel: viewModel)
+        } label: {
+            Image(systemName: viewModel.isEnabled ? "slider.vertical.3" : "slider.vertical.3.slash")
+        }
+        .menuBarExtraStyle(.menu)
     }
 }
 

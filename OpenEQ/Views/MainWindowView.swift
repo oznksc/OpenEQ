@@ -22,6 +22,8 @@ struct MainWindowView: View {
                 // Main Panel (Visualizer & Faders)
                 VStack(spacing: 0) {
                     SpectrumView(
+                        title: viewModel.spectrumTitle,
+                        warning: viewModel.spectrumWarning,
                         levels: viewModel.spectrumLevels,
                         leftLevel: viewModel.leftLevel,
                         rightLevel: viewModel.rightLevel,
@@ -36,9 +38,23 @@ struct MainWindowView: View {
                 
                 Divider()
 
-                // Sidebar Presets
-                PresetPanelView(viewModel: viewModel)
-                    .frame(width: 300)
+                // Sidebar Presets, System Audio, and Sponsors
+                VStack(spacing: 0) {
+                    SystemAudioBetaView(viewModel: viewModel)
+
+                    Divider()
+
+                    PresetPanelView(viewModel: viewModel)
+
+                    Divider()
+
+                    ScrollView(.vertical) {
+                        SponsorView(sponsors: viewModel.sponsors)
+                            .padding(12)
+                    }
+                    .frame(maxHeight: 200)
+                }
+                .frame(width: 340)
             }
 
             Divider()

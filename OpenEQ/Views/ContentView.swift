@@ -1,16 +1,7 @@
-//
-// ContentView.swift
-//  OpenEQ
-//
-//  Created by Gökmen on 26.06.2026.
-//
-
 import SwiftUI
 
 struct ContentView: View {
-    @State private var viewModel = OpenEQViewModel(
-        audioEngineController: AudioEngineController()
-    )
+    let viewModel: OpenEQViewModel
 
     var body: some View {
         MainWindowView(viewModel: viewModel)
@@ -24,6 +15,8 @@ struct ContentView: View {
 }
 
 #Preview {
-    ContentView()
-        .frame(width: 1320, height: 864)
+    ContentView(
+        viewModel: OpenEQViewModel(audioEngineController: AudioEngineController())
+    )
+    .frame(width: 1320, height: 864)
 }

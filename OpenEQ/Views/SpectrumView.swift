@@ -8,6 +8,8 @@
 import SwiftUI
 
 struct SpectrumView: View {
+    let title: String
+    let warning: String?
     let levels: [Float]
     let leftLevel: Float
     let rightLevel: Float
@@ -20,7 +22,7 @@ struct SpectrumView: View {
         VStack(alignment: .leading, spacing: 12) {
             // Header
             HStack(spacing: 12) {
-                Label("Real-Time FFT Spectrum", systemImage: "chart.bar.xaxis")
+                Label(title, systemImage: "chart.bar.xaxis")
                     .font(.headline)
                     .foregroundStyle(.primary)
                 
@@ -41,6 +43,21 @@ struct SpectrumView: View {
                     .padding(.vertical, 3)
                     .background(Color.primary.opacity(0.05))
                     .cornerRadius(4)
+            }
+
+            if let warning {
+                HStack(spacing: 6) {
+                    Image(systemName: "info.circle")
+                        .foregroundStyle(.secondary)
+
+                    Text(warning)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(Color.primary.opacity(0.04))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
             }
 
             // High Performance GPU-Accelerated Canvas Rendering
@@ -170,6 +187,8 @@ struct SpectrumView: View {
 
 #Preview {
     SpectrumView(
+        title: "System Audio Monitor",
+        warning: "Monitor mode analyzes system audio only. It does not apply EQ to system output.",
         levels: Array(repeating: 0.35, count: SpectrumAnalyzer.barCount),
         leftLevel: 0.62,
         rightLevel: 0.58,
