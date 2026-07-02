@@ -131,6 +131,61 @@ final class SpectrumAnalyzer {
         )
     }
 
+    /// Converts a Core Audio input buffer into the same analysis used by AVAudioEngine taps.
+    func analyze(
+        bufferList: UnsafePointer<AudioBufferList>,
+        frameLength: Int,
+        sampleRate: Double
+    ) -> SpectrumAnalysis? {
+        guard frameLength >= fftSize else { return nil }
+
+        updateBinRangesIfNeeded(sampleRate: sampleRate)
+
+        let buffers = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: bufferList))
+        guard let firstBuffer = buffers.first, let firstData = firstBuffer.mData else {
+            return nil
+        }
+
+        let firstChannelCount = max(1, Int(firstBuffer.mNumberChannels))
+        let leftPeak: Float
+        let rightPeak: Float
+
+        if buffers.count >= 2,
+           let leftData = buffers[0].mData,
+           let rightData = buffers[1].mData {
+            let left = leftData.assumingMemoryBound(to: Float.self)
+            let right = rightData.assumingMemoryBound(to: Float.self)
+            leftPeak = peak(in: left, frameLength: frameLength)
+            rightPeak = peak(in: right, frameLength: frameLength)
+
+            for index in 0..<fftSize {
+                monoSamples[index] = (left[index] + right[index]) * 0.5
+            }
+        } else {
+            let samples = firstData.assumingMemoryBound(to: Float.self)
+            leftPeak = peakInterleaved(samples, frameLength: frameLength, channelCount: firstChannelCount, channel: 0)
+            rightPeak = firstChannelCount > 1
+                ? peakInterleaved(samples, frameLength: frameLength, channelCount: firstChannelCount, channel: 1)
+                : leftPeak
+
+            for frame in 0..<fftSize {
+                var sum: Float = 0.0
+                let baseIndex = frame * firstChannelCount
+
+                for channel in 0..<firstChannelCount {
+                    sum += samples[baseIndex + channel]
+                }
+
+                monoSamples[frame] = sum / Float(firstChannelCount)
+            }
+        }
+
+        return analyzePreparedMonoSamples(
+            leftPeak: leftPeak,
+            rightPeak: rightPeak
+        )
+    }
+
     func reset() -> SpectrumAnalysis {
         previousLevels = [Float](repeating: 0.0, count: Self.barCount)
         smoothedLevels = [Float](repeating: 0.0, count: Self.barCount)
@@ -147,6 +202,72 @@ final class SpectrumAnalyzer {
         var peak: Float = 0.0
         vDSP_maxmgv(channel, 1, &peak, vDSP_Length(frameLength))
         return min(1.0, peak)
+    }
+
+    private func peakInterleaved(
+        _ samples: UnsafePointer<Float>,
+        frameLength: Int,
+        channelCount: Int,
+        channel: Int
+    ) -> Float {
+        var peak: Float = 0.0
+        vDSP_maxmgv(
+            samples.advanced(by: channel),
+            vDSP_Stride(channelCount),
+            &peak,
+            vDSP_Length(frameLength)
+        )
+        return min(1.0, peak)
+    }
+
+    private func analyzePreparedMonoSamples(leftPeak: Float, rightPeak: Float) -> SpectrumAnalysis {
+        vDSP_vmul(monoSamples, 1, window, 1, &windowedSamples, 1, vDSP_Length(fftSize))
+
+        realBuffer.withUnsafeMutableBufferPointer { rPtr in
+            imagBuffer.withUnsafeMutableBufferPointer { iPtr in
+                var splitComplex = DSPSplitComplex(realp: rPtr.baseAddress!, imagp: iPtr.baseAddress!)
+
+                windowedSamples.withUnsafeBufferPointer { wPtr in
+                    wPtr.baseAddress!.withMemoryRebound(to: DSPComplex.self, capacity: fftSize / 2) { complexPtr in
+                        vDSP_ctoz(complexPtr, 2, &splitComplex, 1, vDSP_Length(fftSize / 2))
+                    }
+                }
+
+                vDSP_fft_zrip(fftSetup, &splitComplex, 1, log2n, FFTDirection(FFT_FORWARD))
+                vDSP_zvmags(&splitComplex, 1, &magnitudes, 1, vDSP_Length(fftSize / 2))
+            }
+        }
+
+        var scale = 1.0 / Float(fftSize)
+        vDSP_vsmul(magnitudes, 1, &scale, &magnitudes, 1, vDSP_Length(fftSize / 2))
+
+        for index in 0..<Self.barCount {
+            let range = binRanges[index]
+            var sum: Float = 0.0
+            let count = max(1, range.end - range.start)
+
+            for bin in range.start..<range.end {
+                sum += magnitudes[bin]
+            }
+
+            let average = sum / Float(count)
+            let db = 10 * log10(average + 1e-9)
+            let normalized = max(0.0, min(1.0, (db + 60.0) / 55.0))
+            let smoothing: Float = normalized > previousLevels[index] ? 0.45 : 0.12
+            let smoothed = (normalized * smoothing) + (previousLevels[index] * (1.0 - smoothing))
+
+            smoothedLevels[index] = smoothed
+            previousLevels[index] = smoothed
+        }
+
+        let peakLevel = max(leftPeak, rightPeak)
+        return SpectrumAnalysis(
+            levels: smoothedLevels,
+            leftPeak: leftPeak,
+            rightPeak: rightPeak,
+            peakLevel: peakLevel,
+            isClipping: peakLevel >= 0.96
+        )
     }
 
     private func updateBinRangesIfNeeded(sampleRate: Double) {

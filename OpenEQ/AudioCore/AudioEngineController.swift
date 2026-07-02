@@ -19,10 +19,13 @@ final class AudioEngineController {
     private(set) var peakLevel: Float = 0.0
     private(set) var isClipping: Bool = false
 
+    private var volumeBoostMultiplier: Float = 1.0
+    private var currentPreampGain: Float = 0.0
+
     private let logger = AppLogger(category: "AudioEngine")
     private let engine = AVAudioEngine()
     private let player = AVAudioPlayerNode()
-    private let eq = AVAudioUnitEQ(numberOfBands: 10)
+    private let eq = AVAudioUnitEQ(numberOfBands: 31)
     private let analyzer = SpectrumAnalyzer()
     
     private var audioFile: AVAudioFile?
@@ -38,10 +41,15 @@ final class AudioEngineController {
         teardown()
     }
 
+    var currentGraphicBandCount: GraphicBandCount = .ten
+
     private func configureEQ() {
-        for (index, modelBand) in EQBand.defaultBands().enumerated() {
+        let defaultBands = EQBand.defaultBands(count: .thirtyOne)
+        for index in 0..<eq.bands.count {
             let audioBand = eq.bands[index]
-            audioBand.frequency = modelBand.frequency
+            if index < defaultBands.count {
+                audioBand.frequency = defaultBands[index].frequency
+            }
             audioBand.filterType = .parametric
             audioBand.bandwidth = EQBand.defaultQ
             audioBand.gain = EQBand.neutralGain
@@ -271,11 +279,25 @@ final class AudioEngineController {
         }
     }
 
+    func setBypass(_ bypass: Bool) {
+        eq.bypass = bypass
+    }
+
+    func setVolumeBoost(_ multiplier: Double) {
+        volumeBoostMultiplier = Float(multiplier)
+        applyVolume()
+    }
+
     func setPreampGain(_ gain: Float) {
         let clampedGain = max(EQBand.gainRange.lowerBound, min(EQBand.gainRange.upperBound, gain))
-        let volumeMultiplier = pow(10.0, clampedGain / 20.0)
-        player.volume = volumeMultiplier
+        currentPreampGain = clampedGain
+        applyVolume()
         currentPreset.preamp = clampedGain
+    }
+
+    private func applyVolume() {
+        let preampVolume = pow(10.0, currentPreampGain / 20.0)
+        player.volume = preampVolume * volumeBoostMultiplier
     }
 
     func applyPreset(_ preset: EQPreset) {

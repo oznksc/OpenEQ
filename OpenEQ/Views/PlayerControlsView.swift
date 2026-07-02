@@ -1,10 +1,3 @@
-//
-//  PlayerControlsView.swift
-//  OpenEQ
-//
-//  Created by Gökmen on 26.06.2026.
-//
-
 import SwiftUI
 import Combine
 
@@ -12,26 +5,24 @@ struct PlayerControlsView: View {
     @Bindable var viewModel: OpenEQViewModel
 
     @State private var currentTime: Double = 0.0
-    private let totalDuration: Double = 214.0 // 3:34 mock duration
+    private let totalDuration: Double = 214.0
     @State private var rotationAngle: Double = 0.0
-    
-    // Timer to animate progress scrubber and spinning vinyl when playing
+
     private let timer = Timer.publish(every: 0.1, on: .main, in: .common).autoconnect()
 
     var body: some View {
         VStack(spacing: 8) {
-            // Error Message Banner
             if let error = viewModel.errorMessage {
                 HStack(spacing: 8) {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .foregroundStyle(.red)
-                    
+
                     Text(error)
                         .font(.caption)
                         .foregroundStyle(.red)
-                    
+
                     Spacer()
-                    
+
                     Button(action: {
                         viewModel.errorMessage = nil
                     }) {
@@ -47,28 +38,27 @@ struct PlayerControlsView: View {
                 .padding(.horizontal, 20)
                 .padding(.top, 4)
             }
-            
+
             HStack(spacing: 24) {
-                // 1. Track Info (Displays selected file name)
                 HStack(spacing: 12) {
                     ZStack {
                         RoundedRectangle(cornerRadius: 8)
                             .fill(Color.primary.opacity(0.05))
                             .frame(width: 44, height: 44)
-                        
+
                         Image(systemName: "music.note")
                             .font(.title2)
                             .foregroundStyle(viewModel.selectedFileURL != nil ? Color.accentColor : Color.secondary)
                             .rotationEffect(.degrees(rotationAngle))
                             .animation(.linear(duration: 0.1), value: rotationAngle)
                     }
-                    
+
                     VStack(alignment: .leading, spacing: 2) {
                         Text(viewModel.selectedFileName)
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(.primary)
                             .lineLimit(1)
-                        
+
                         Text(viewModel.selectedFileURL != nil ? "Local Audio File" : "No File Loaded")
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -76,13 +66,11 @@ struct PlayerControlsView: View {
                     }
                     .frame(width: 140, alignment: .leading)
                 }
-                
+
                 Divider()
                     .frame(height: 32)
-                
-                // 2. Playback Control Buttons
+
                 HStack(spacing: 8) {
-                    // Open Audio Button
                     Button(action: {
                         viewModel.openAudioFile()
                     }) {
@@ -91,8 +79,7 @@ struct PlayerControlsView: View {
                     }
                     .buttonStyle(.bordered)
                     .help("Open Audio File...")
-                    
-                    // Stop button
+
                     Button(action: {
                         viewModel.stop()
                         currentTime = 0.0
@@ -104,8 +91,7 @@ struct PlayerControlsView: View {
                     .buttonStyle(.bordered)
                     .disabled(viewModel.selectedFileURL == nil)
                     .help("Stop")
-                    
-                    // Play button
+
                     Button(action: {
                         viewModel.play()
                     }) {
@@ -116,8 +102,7 @@ struct PlayerControlsView: View {
                     .buttonStyle(.borderedProminent)
                     .disabled(viewModel.selectedFileURL == nil)
                     .help("Play")
-                    
-                    // Pause button
+
                     Button(action: {
                         viewModel.pause()
                     }) {
@@ -129,14 +114,13 @@ struct PlayerControlsView: View {
                     .disabled(viewModel.selectedFileURL == nil)
                     .help("Pause")
                 }
-                
-                // 3. Scrubbing Progress Bar
+
                 HStack(spacing: 10) {
                     Text(formatTime(currentTime))
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
                         .frame(width: 38)
-                    
+
                     Slider(
                         value: Binding(
                             get: { currentTime },
@@ -146,17 +130,16 @@ struct PlayerControlsView: View {
                     )
                     .disabled(viewModel.selectedFileURL == nil)
                     .frame(maxWidth: .infinity)
-                    
+
                     Text(formatTime(totalDuration))
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
                         .frame(width: 38)
                 }
-                
+
                 Divider()
                     .frame(height: 32)
-                
-                // 4. Volume Dock
+
                 HStack(spacing: 10) {
                     Button(action: {
                         viewModel.isMuted.toggle()
@@ -168,7 +151,7 @@ struct PlayerControlsView: View {
                     }
                     .buttonStyle(.plain)
                     .help(viewModel.isMuted ? "Unmute" : "Mute")
-                    
+
                     Slider(
                         value: Binding(
                             get: { viewModel.isMuted ? 0.0 : viewModel.volume },
@@ -179,14 +162,23 @@ struct PlayerControlsView: View {
                                 }
                             }
                         ),
-                        in: 0...1
+                        in: 0...(viewModel.isVolumeBoostEnabled ? 2.0 : 1.0)
                     )
                     .frame(width: 110)
-                    
+
                     Text("\(Int((viewModel.isMuted ? 0.0 : viewModel.volume) * 100))%")
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
                         .frame(width: 32, alignment: .trailing)
+
+                    Button(action: {
+                        viewModel.toggleVolumeBoost()
+                    }) {
+                        Image(systemName: viewModel.isVolumeBoostEnabled ? "bolt.fill" : "bolt")
+                            .foregroundStyle(viewModel.isVolumeBoostEnabled ? .yellow : .secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help(viewModel.isVolumeBoostEnabled ? "Volume Boost ON (200%)" : "Volume Boost OFF")
                 }
             }
             .padding(.horizontal, 20)
@@ -195,15 +187,12 @@ struct PlayerControlsView: View {
         .background(Color(nsColor: .controlBackgroundColor))
         .onReceive(timer) { _ in
             if viewModel.playbackState == .playing {
-                // Increment elapsed time
                 currentTime = (currentTime + 0.1).truncatingRemainder(dividingBy: totalDuration)
-                // Spin vinyl
                 rotationAngle = (rotationAngle + 4.5).truncatingRemainder(dividingBy: 360)
             }
         }
     }
-    
-    // MARK: - Dynamic Volume Icon Selection
+
     private var volumeIcon: String {
         if viewModel.isMuted || viewModel.volume == 0 {
             return "speaker.slash.fill"
@@ -215,8 +204,7 @@ struct PlayerControlsView: View {
             return "speaker.wave.3.fill"
         }
     }
-    
-    // MARK: - Helper to format duration to mm:ss
+
     private func formatTime(_ seconds: Double) -> String {
         let mins = Int(seconds) / 60
         let secs = Int(seconds) % 60

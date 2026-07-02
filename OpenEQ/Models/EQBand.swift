@@ -32,6 +32,22 @@ enum EQFilterType: String, CaseIterable, Codable, Identifiable {
     }
 }
 
+enum GraphicBandCount: String, CaseIterable, Codable, Identifiable {
+    case ten = "10-Band"
+    case thirtyOne = "31-Band"
+
+    var id: String { rawValue }
+
+    var title: String { rawValue }
+
+    var bandCount: Int {
+        switch self {
+        case .ten: return 10
+        case .thirtyOne: return 31
+        }
+    }
+}
+
 /// Represents a single equalizer band parameter set for audio filtering.
 struct EQBand: Identifiable, Codable, Equatable {
     static let neutralGain: Float = 0.0
@@ -112,12 +128,13 @@ struct EQBand: Identifiable, Codable, Equatable {
 }
 
 extension EQBand {
-    /// Generates the standard 10-band equalizer frequencies.
-    static func defaultBands() -> [EQBand] {
-        let standardFrequencies: [Float] = [
-            32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000
-        ]
-        return standardFrequencies.map { EQBand(frequency: $0) }
+    static func defaultBands(count: GraphicBandCount = .ten) -> [EQBand] {
+        switch count {
+        case .ten:
+            return tenBandFrequencies.map { EQBand(frequency: $0) }
+        case .thirtyOne:
+            return thirtyOneBandFrequencies.map { EQBand(frequency: $0) }
+        }
     }
 
     static func defaultParametricBands() -> [EQBand] {
@@ -130,17 +147,22 @@ extension EQBand {
         ]
     }
 
-    static func defaultBands(for mode: EQMode) -> [EQBand] {
+    static func defaultBands(for mode: EQMode, graphicBandCount: GraphicBandCount = .ten) -> [EQBand] {
         switch mode {
         case .graphic:
-            return defaultBands()
+            return defaultBands(count: graphicBandCount)
         case .parametric:
             return defaultParametricBands()
         }
     }
-    
-    /// For compatibility with older view files until updated
-    static var mockTenBand: [EQBand] {
-        return defaultBands()
-    }
+
+    static let tenBandFrequencies: [Float] = [
+        32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000
+    ]
+
+    static let thirtyOneBandFrequencies: [Float] = [
+        20, 25, 31.5, 40, 50, 63, 80, 100, 125, 160, 200, 250, 315, 400, 500, 630,
+        800, 1000, 1250, 1600, 2000, 2500, 3150, 4000, 5000, 6300, 8000, 10000,
+        12500, 16000, 20000
+    ]
 }
