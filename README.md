@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="openeq-app-icon.png" alt="OpenEQ Logo" width="200" />
+</p>
+
 # OpenEQ
 
 An open-source macOS audio equalizer application built with **SwiftUI**, **AVFoundation**, and **Accelerate (vDSP)**. OpenEQ provides a lightweight, performant desktop dashboard designed for audio adjustments, custom graphic equalization curves, and real-time audio analysis.
