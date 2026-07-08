@@ -23,7 +23,6 @@ final class OpenEQViewModel {
     var isEnabled: Bool = true
     var graphicBandCount: GraphicBandCount = .ten
     var isVolumeBoostEnabled: Bool = false
-    var sponsors: [Sponsor] = []
     var isShowingSystemAudio: Bool = false
     
     var playbackState: AudioEngineState {
@@ -119,7 +118,6 @@ final class OpenEQViewModel {
     private let audioEngineController: AudioEngineController
     private let systemAudioManager: SystemAudioManager
     private let presetStore = PresetStore()
-    private let sponsorStore = SponsorStore()
     private var graphicBands: [EQBand]
     private var parametricBands: [EQBand]
 
@@ -160,8 +158,6 @@ final class OpenEQViewModel {
         self.externalLoopbackLatency = systemAudioManager.externalLoopbackLatency
         self.isExternalLoopbackBypassed = systemAudioManager.isExternalLoopbackBypassed
         self.systemAudioLatency = systemAudioManager.systemAudioLatency
-
-        self.sponsors = sponsorStore.loadSponsors()
 
         self.audioEngineController.currentGraphicBandCount = .ten
         self.audioEngineController.applyPreset(initialPreset)

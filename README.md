@@ -43,30 +43,13 @@ An open-source macOS audio equalizer application built with **SwiftUI**, **AVFou
 | `⌘⇧V` | Toggle Volume Boost |
 | `Space` | Play/Pause |
 
-## Sponsor
-
-OpenEQ is 100% free and open-source (MIT). If you find it useful, consider supporting the project:
-
-- [Sponsor on GitHub](https://github.com/sponsors) — Get your logo in the app!
-- [Star on GitHub](https://github.com/ozan/OpenEQ) — Helps others discover the project.
-
-### Current Sponsors
-
-> Be the first sponsor! Contact us to get your logo displayed here and in the app.
-
-| Tier | Perks |
-|------|-------|
-| **Gold** | Large logo in app + README, priority feature requests |
-| **Silver** | Medium logo in app + README |
-| **Bronze** | Small logo in README |
-
 ## Architecture Overview
 OpenEQ is structured around clean, modular boundaries:
 1. **SwiftUI Layer**: Responsive user interface including custom faders and GPU-buffered spectrum canvas drawing.
 2. **ViewModel Layer (MVVM)**: Observes playback states and manages UI interactions, data bindings, and user preferences persistence.
 3. **AudioCore Layer**: Interfaces with Apple's `AVAudioEngine`, establishing node graphs, parametric filters, volume multipliers, and output taps.
 4. **vDSP Spectrum Analyzer**: Executes windowing and Forward Discrete Fourier Transforms on captured buffer frames.
-5. **Services**: PresetStore (JSON-based preset persistence) and SponsorStore (sponsor configuration).
+5. **Services**: PresetStore (JSON-based preset persistence).
 
 For detailed design specifications, see [docs/architecture.md](docs/architecture.md).
 

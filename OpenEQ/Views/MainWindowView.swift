@@ -45,14 +45,6 @@ struct MainWindowView: View {
                     ScrollView(.vertical, showsIndicators: false) {
                         VStack(spacing: 12) {
                             PresetPanelView(viewModel: viewModel)
-
-                            Divider()
-                                .opacity(0.3)
-                                .padding(.horizontal, 16)
-
-                            SponsorView(sponsors: viewModel.sponsors)
-                                .padding(.horizontal, 16)
-                                .padding(.bottom, 16)
                         }
                     }
                     .frame(width: sidebarWidth)
