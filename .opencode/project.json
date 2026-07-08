@@ -1,0 +1,32 @@
+{
+  "name": "OpenEQ",
+  "description": "macOS audio equalizer — system-wide EQ via Core Audio Tap, 10/31-band graphic EQ, 5-band parametric EQ, FFT spectrum analyzer",
+  "language": "swift",
+  "platform": "macos",
+  "min_macos_version": "14.0",
+  "architecture": "MVVM (SwiftUI + @Observable ViewModels + AVAudioEngine/Core Audio)",
+  "build": {
+    "command": "xcodebuild -project OpenEQ.xcodeproj -scheme OpenEQ build",
+    "test_command": "xcodebuild test -project OpenEQ.xcodeproj -scheme OpenEQ -destination 'platform=macOS'"
+  },
+  "conventions": {
+    "import_order": ["Apple frameworks first (AVFoundation, CoreAudio, Accelerate), then Foundation/SwiftUI, then project modules"],
+    "naming": "PascalCase types, camelCase vars/funcs, UpperCamelCase for enum cases",
+    "observation": "Use @Observable macro (iOS 17+ / macOS 14+) for all view models",
+    "audio_thread_safety": "No allocations, locks, or GCD sync inside tap callbacks or IOProcs. Use atomic flags and pre-allocated buffers.",
+    "error_handling": "Use enums conforming to LocalizedError for domain errors; prefer throws over Result.",
+    "file_structure": "One type per file, grouped by layer: Views/, ViewModels/, AudioCore/, Models/, Services/, Utilities/"
+  },
+  "key_files": {
+    "app_entry": "OpenEQ/App/OpenEQApp.swift",
+    "main_view_model": "OpenEQ/ViewModels/OpenEQViewModel.swift",
+    "local_audio_engine": "OpenEQ/AudioCore/AudioEngineController.swift",
+    "system_audio_engine": "OpenEQ/AudioCore/SystemAudioEQEngine.swift",
+    "external_loopback": "OpenEQ/AudioCore/ExternalLoopbackEngine.swift",
+    "system_audio_manager": "OpenEQ/AudioCore/SystemAudioManager.swift",
+    "core_audio_tap": "OpenEQ/AudioCore/CoreAudioTapManager.swift",
+    "spectrum_analyzer": "OpenEQ/AudioCore/SpectrumAnalyzer.swift",
+    "preset_store": "OpenEQ/Services/PresetStore.swift"
+  },
+  "testing_strategy": "See docs/TESTING_STRATEGY.md — XCTest for unit/integration, manual for audio quality"
+}

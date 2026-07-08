@@ -1,0 +1,17 @@
+disabled_rules:
+  - line_length
+  - trailing_whitespace
+  - identifier_name
+  - function_body_length
+  - type_body_length
+  - file_length
+
+opt_in_rules:
+  - prefer_self_type_over_type_of_self
+  - sorted_imports
+
+included:
+  - OpenEQ
+excluded:
+  - OpenEQ/App
+  - DerivedData

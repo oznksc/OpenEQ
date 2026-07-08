@@ -66,8 +66,10 @@ final class SystemAudioEQEngine {
         logger.info("System-wide EQ stopped")
     }
 
+    var isBypassed = false
+
     func updateEQ(_ preset: EQPreset) { lastEQPreset = preset }
-    func setBypassed(_ bypassed: Bool) {}
+    func setBypassed(_ bypassed: Bool) { isBypassed = bypassed }
 
     // MARK: - Setup
 
@@ -139,44 +141,47 @@ final class SystemAudioEQEngine {
     private nonisolated(unsafe) static var testPhase: Float = 0
 
     private func handleIO(inData: UnsafePointer<AudioBufferList>, outData: UnsafeMutablePointer<AudioBufferList>, format: AVAudioFormat) {
+        let inBuffers = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: inData))
         let outBuffers = UnsafeMutableAudioBufferListPointer(outData)
         let channelCount = Int(format.channelCount)
 
-        if let inBuf = (UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: inData))).first,
-           let inBufData = inBuf.mData, inBuf.mDataByteSize > 0 {
-            let inSamples = Int(inBuf.mDataByteSize) / MemoryLayout<Float>.size
-            let inFrames = inSamples / channelCount
-            let src = inBufData.assumingMemoryBound(to: Float.self)
-            let preset = lastEQPreset ?? EQPreset.flatPreset()
-            for outBuf in outBuffers {
-                guard let outPtr = outBuf.mData else { continue }
-                let outBytes = Int(outBuf.mDataByteSize)
-                let dest = outPtr.assumingMemoryBound(to: Float.self)
-                let copySamples = min(outBytes / MemoryLayout<Float>.size, inSamples)
-                if copySamples > 0 {
-                    memcpy(dest, src, copySamples * MemoryLayout<Float>.size)
-                    applyEQ(dest, frames: inFrames, channels: channelCount, preset: preset)
-                }
-                if copySamples < outBytes / MemoryLayout<Float>.size {
-                    memset(dest + copySamples, 0, outBytes - copySamples * MemoryLayout<Float>.size)
+        if let firstBuf = inBuffers.first, firstBuf.mData != nil, firstBuf.mDataByteSize > 0 {
+            let activeChannels = min(inBuffers.count, outBuffers.count, channelCount)
+
+            for ch in 0..<activeChannels {
+                guard let inChData = inBuffers[ch].mData,
+                      let outChData = outBuffers[ch].mData else { continue }
+                let copyBytes = min(inBuffers[ch].mDataByteSize, outBuffers[ch].mDataByteSize)
+                let frames = Int(copyBytes) / MemoryLayout<Float>.size
+                guard frames > 0 else { continue }
+                let src = inChData.assumingMemoryBound(to: Float.self)
+                let dest = outChData.assumingMemoryBound(to: Float.self)
+                memcpy(dest, src, Int(copyBytes))
+                if !isBypassed, let preset = lastEQPreset {
+                    applyEQChannel(dest, frames: frames, preset: preset)
                 }
             }
-            if let analysis = analyzer.analyze(bufferList: inData, frameLength: inSamples, sampleRate: sampleRate) {
+
+            for ch in activeChannels..<outBuffers.count {
+                guard let data = outBuffers[ch].mData, outBuffers[ch].mDataByteSize > 0 else { continue }
+                memset(data, 0, Int(outBuffers[ch].mDataByteSize))
+            }
+
+            let analysisFrames = inBuffers.first?.mDataByteSize ?? 0 > 0
+                ? Int(inBuffers[0].mDataByteSize) / MemoryLayout<Float>.size : 0
+            if analysisFrames > 0,
+               let analysis = analyzer.analyze(bufferList: inData, frameLength: analysisFrames, sampleRate: sampleRate) {
                 DispatchQueue.main.async { [weak self] in self?.onAnalysis?(analysis) }
             }
         } else {
-            for outBuf in outBuffers {
-                guard let ptr = outBuf.mData, outBuf.mDataByteSize > 0 else { continue }
-                let totalSamples = Int(outBuf.mDataByteSize) / MemoryLayout<Float>.size
-                let frames = totalSamples / channelCount
-                let outF = ptr.assumingMemoryBound(to: Float.self)
-                for ch in 0..<channelCount {
-                    let cd = outF.advanced(by: ch * frames)
-                    for i in 0..<frames {
-                        cd[i] = sin(Self.testPhase) * 0.02
-                        Self.testPhase += 2 * Float.pi * 440 / Float(sampleRate)
-                        if Self.testPhase > 2 * Float.pi { Self.testPhase -= 2 * Float.pi }
-                    }
+            for ch in 0..<min(outBuffers.count, channelCount) {
+                guard let data = outBuffers[ch].mData, outBuffers[ch].mDataByteSize > 0 else { continue }
+                let frames = Int(outBuffers[ch].mDataByteSize) / MemoryLayout<Float>.size
+                let ptr = data.assumingMemoryBound(to: Float.self)
+                for i in 0..<frames {
+                    ptr[i] = sin(Self.testPhase) * 0.02
+                    Self.testPhase += 2 * Float.pi * 440 / Float(sampleRate)
+                    if Self.testPhase > 2 * Float.pi { Self.testPhase -= 2 * Float.pi }
                 }
             }
         }
@@ -184,27 +189,24 @@ final class SystemAudioEQEngine {
 
     // MARK: - EQ
 
-    private func applyEQ(_ s: UnsafeMutablePointer<Float>, frames: Int, channels: Int, preset: EQPreset) {
+    private func applyEQChannel(_ s: UnsafeMutablePointer<Float>, frames: Int, preset: EQPreset) {
         let gGain = dbToLinear(preset.preamp)
         let gains: [Float] = preset.bands.map { dbToLinear($0.gain) }
         let sr = Float(sampleRate)
         let bc = min(gains.count, 31)
-        for ch in 0..<channels {
-            let cd = s.advanced(by: ch * frames)
-            if abs(gGain - 1.0) > 0.01 { var g = gGain; vDSP_vsmul(cd, 1, &g, cd, 1, vDSP_Length(frames)) }
-            for b in 0..<bc {
-                let gl = gains[b]
-                guard abs(gl - 1.0) > 0.01 else { continue }
-                let w0 = 2 * Float.pi * kOpenEQBands[b] / sr
-                guard w0 < Float.pi else { continue }
-                let Q: Float = 1.414; let a = sin(w0) / (2 * Q); let A = sqrt(gl)
-                let (b0,b1,b2,a0,a1,a2): (Float,Float,Float,Float,Float,Float)
-                if gl >= 1.0 { b0=1+a*A; b1 = -2*cos(w0); b2=1-a*A; a0=1+a/A; a1 = -2*cos(w0); a2=1-a/A }
-                else { b0=1+a/A; b1 = -2*cos(w0); b2=1-a/A; a0=1+a*A; a1 = -2*cos(w0); a2=1-a/A }
-                let ai=1/a0; let f0=b0*ai,f1=b1*ai,f2=b2*ai; let g0=a1*ai,g1=a2*ai
-                var x1:Float=0,x2:Float=0,y1:Float=0,y2:Float=0
-                for i in 0..<frames { let x0=cd[i]; let y0=f0*x0+f1*x1+f2*x2-g0*y1-g1*y2; cd[i]=y0; x2=x1;x1=x0;y2=y1;y1=y0 }
-            }
+        if abs(gGain - 1.0) > 0.01 { var g = gGain; vDSP_vsmul(s, 1, &g, s, 1, vDSP_Length(frames)) }
+        for b in 0..<bc {
+            let gl = gains[b]
+            guard abs(gl - 1.0) > 0.01 else { continue }
+            let w0 = 2 * Float.pi * kOpenEQBands[b] / sr
+            guard w0 < Float.pi else { continue }
+            let Q: Float = 1.414; let a = sin(w0) / (2 * Q); let A = sqrt(gl)
+            let (b0,b1,b2,a0,a1,a2): (Float,Float,Float,Float,Float,Float)
+            if gl >= 1.0 { b0=1+a*A; b1 = -2*cos(w0); b2=1-a*A; a0=1+a/A; a1 = -2*cos(w0); a2=1-a/A }
+            else { b0=1+a/A; b1 = -2*cos(w0); b2=1-a/A; a0=1+a*A; a1 = -2*cos(w0); a2=1-a/A }
+            let ai=1/a0; let f0=b0*ai,f1=b1*ai,f2=b2*ai; let g0=a1*ai,g1=a2*ai
+            var x1:Float=0,x2:Float=0,y1:Float=0,y2:Float=0
+            for i in 0..<frames { let x0=s[i]; let y0=f0*x0+f1*x1+f2*x2-g0*y1-g1*y2; s[i]=y0; x2=x1;x1=x0;y2=y1;y1=y0 }
         }
     }
 

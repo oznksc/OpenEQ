@@ -1,0 +1,33 @@
+name: OpenEQ CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  build-and-test:
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_16.app/Contents/Developer
+
+      - name: Build
+        run: |
+          xcodebuild clean build \
+            -project OpenEQ.xcodeproj \
+            -scheme OpenEQ \
+            -destination 'platform=macOS' \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Test
+        run: |
+          xcodebuild test \
+            -project OpenEQ.xcodeproj \
+            -scheme OpenEQ \
+            -destination 'platform=macOS' \
+            CODE_SIGNING_ALLOWED=NO

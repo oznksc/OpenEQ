@@ -32,6 +32,7 @@ final class AudioEngineController {
     private var currentFileURL: URL?
     private var isGraphConnected = false
     private var isTapInstalled = false
+    private var lastProcessingFormat: AVAudioFormat?
 
     init() {
         configureEQ()
@@ -124,13 +125,33 @@ final class AudioEngineController {
             throw engineError
         }
 
+        let newFormat = file.processingFormat
+        let isFormatChange = lastProcessingFormat.map {
+            $0.sampleRate != newFormat.sampleRate || $0.channelCount != newFormat.channelCount
+        } ?? false
+
+        if isFormatChange {
+            logger.info("Format change: \(lastProcessingFormat!.sampleRate)ch/\(lastProcessingFormat!.channelCount) -> \(newFormat.sampleRate)ch/\(newFormat.channelCount)")
+            engine.stop()
+            engine.reset()
+        }
+
         do {
-            try connectGraph(format: file.processingFormat)
+            try connectGraph(format: newFormat)
         } catch {
             fail(error)
             throw error
         }
 
+        if isFormatChange {
+            do {
+                try engine.start()
+            } catch {
+                logger.error("Engine restart after format change failed: \(error.localizedDescription)")
+            }
+        }
+
+        lastProcessingFormat = newFormat
         audioFile = file
         currentFileURL = url
         player.scheduleFile(file, at: nil, completionHandler: nil)
