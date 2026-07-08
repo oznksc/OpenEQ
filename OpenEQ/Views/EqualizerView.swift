@@ -97,37 +97,62 @@ struct EqualizerView: View {
     private var preampControl: some View {
         VStack(spacing: 6) {
             Text(String(format: "%+.1f dB", viewModel.preamp))
-                .font(.system(size: 9, weight: .bold, design: .monospaced))
+                .font(.system(size: 9, weight: .semibold, design: .monospaced))
                 .foregroundStyle(viewModel.preamp == 0.0 ? Color.secondary : Color.orange)
                 .frame(height: 12)
 
             GeometryReader { geometry in
                 let height = geometry.size.height
-                let thumbSize: CGFloat = 14
+                let thumbSize: CGFloat = 12
                 let trackHeight = height - thumbSize
 
                 let percent = CGFloat((viewModel.preamp - EQBand.gainRange.lowerBound) / (EQBand.gainRange.upperBound - EQBand.gainRange.lowerBound))
                 let thumbY = trackHeight * (1.0 - percent)
+                
+                let centerPos = trackHeight / 2
+                let fillHeight = abs(percent - 0.5) * trackHeight
+                let fillY = percent > 0.5 ? thumbY : centerPos
 
                 ZStack(alignment: .top) {
+                    // Track Background
                     RoundedRectangle(cornerRadius: 3)
-                        .fill(Color.orange.opacity(0.12))
-                        .frame(width: 3)
+                        .fill(Color.primary.opacity(0.06))
+                        .frame(width: 4)
 
+                    // Center Tick Mark
                     Rectangle()
-                        .fill(Color.orange.opacity(0.4))
-                        .frame(width: 12, height: 1.5)
-                        .offset(y: trackHeight / 2 + thumbSize / 2 - 0.75)
+                        .fill(Color.primary.opacity(0.2))
+                        .frame(width: 12, height: 1)
+                        .offset(y: centerPos + thumbSize / 2)
 
-                    Circle()
-                        .fill(LinearGradient(colors: [.orange, .red], startPoint: .top, endPoint: .bottom))
-                        .frame(width: thumbSize, height: thumbSize)
-                        .shadow(color: Color.orange.opacity(0.3), radius: 2)
+                    // Active Fill
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(Color.orange.opacity(0.85))
+                        .frame(width: 4, height: fillHeight)
+                        .offset(y: fillY + thumbSize / 2)
+
+                    // Fader Handle
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(LinearGradient(
+                            colors: [Color(nsColor: .controlColor), Color(nsColor: .alternateSelectedControlTextColor).opacity(0.8)],
+                            startPoint: .top, endPoint: .bottom
+                        ))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 3)
+                                .stroke(Color.orange.opacity(0.5), lineWidth: 1)
+                        )
+                        .overlay(
+                            Rectangle()
+                                .fill(Color.orange)
+                                .frame(height: 2)
+                        )
+                        .frame(width: 18, height: 10)
+                        .shadow(color: Color.black.opacity(0.15), radius: 1, y: 1)
                         .offset(y: thumbY)
                         .gesture(
                             DragGesture(minimumDistance: 0)
                                 .onChanged { value in
-                                    let newY = min(max(0, value.location.y - thumbSize / 2), trackHeight)
+                                    let newY = min(max(0, value.location.y - 5), trackHeight)
                                     let newPercent = 1.0 - (newY / trackHeight)
                                     let rawPreamp = EQBand.gainRange.lowerBound + Float(newPercent) * (EQBand.gainRange.upperBound - EQBand.gainRange.lowerBound)
                                     viewModel.updatePreamp(gain: abs(rawPreamp) < 0.4 ? 0.0 : Float(round(rawPreamp * 2) / 2))
@@ -165,8 +190,8 @@ struct EQBandControl: View {
     var body: some View {
         VStack(spacing: 6) {
             Text(String(format: "%+.1f", gain))
-                .font(.system(size: 8, weight: .medium, design: .monospaced))
-                .foregroundStyle(gain == 0.0 ? Color.secondary : (gain > 0 ? Color.green : Color.red))
+                .font(.system(size: 8, weight: .semibold, design: .monospaced))
+                .foregroundStyle(gain == 0.0 ? Color.secondary : (gain > 0 ? Color.cyan : Color.orange))
                 .frame(height: 10)
 
             GeometryReader { geometry in
@@ -177,32 +202,53 @@ struct EQBandControl: View {
                 let maxGain = EQBand.gainRange.upperBound
                 let percent = CGFloat((gain - minGain) / (maxGain - minGain))
                 let thumbY = trackHeight * (1.0 - percent)
+                
+                let centerPos = trackHeight / 2
+                let fillHeight = abs(percent - 0.5) * trackHeight
+                let fillY = percent > 0.5 ? thumbY : centerPos
 
                 ZStack(alignment: .top) {
-                    RoundedRectangle(cornerRadius: 2)
-                        .fill(Color.primary.opacity(0.08))
-                        .frame(width: 3)
+                    // Track Background
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(Color.primary.opacity(0.06))
+                        .frame(width: 4)
                         .frame(maxHeight: .infinity)
 
+                    // Center zero tick
                     Rectangle()
-                        .fill(Color.primary.opacity(0.3))
+                        .fill(Color.primary.opacity(0.2))
                         .frame(width: 10, height: 1)
-                        .offset(y: trackHeight / 2 + thumbSize / 2 - 0.5)
+                        .offset(y: centerPos + thumbSize / 2)
 
-                    Circle()
+                    // Dynamic Fill
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(gain > 0 ? Color.cyan.opacity(0.85) : Color.orange.opacity(0.85))
+                        .frame(width: 4, height: fillHeight)
+                        .offset(y: fillY + thumbSize / 2)
+
+                    // Fader Handle
+                    RoundedRectangle(cornerRadius: 2.5)
                         .fill(LinearGradient(
-                            colors: isDragging ? [.cyan, .blue] : [Color(nsColor: .controlColor), Color(nsColor: .alternateSelectedControlTextColor)],
+                            colors: isDragging ? [.cyan, .blue] : [Color(nsColor: .controlColor), Color(nsColor: .alternateSelectedControlTextColor).opacity(0.8)],
                             startPoint: .top, endPoint: .bottom
                         ))
-                        .overlay(Circle().stroke(isDragging ? Color.blue : Color.primary.opacity(0.3), lineWidth: 1))
-                        .shadow(color: Color.black.opacity(0.15), radius: 1, y: 1)
-                        .frame(width: thumbSize, height: thumbSize)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 2.5)
+                                .stroke(isDragging ? Color.cyan : Color.primary.opacity(0.2), lineWidth: 1)
+                        )
+                        .overlay(
+                            Rectangle()
+                                .fill(isDragging ? Color.white : (gain == 0.0 ? Color.primary.opacity(0.3) : (gain > 0 ? Color.cyan : Color.orange)))
+                                .frame(height: 1.5)
+                        )
+                        .frame(width: 16, height: 8)
+                        .shadow(color: Color.black.opacity(0.12), radius: 1, y: 1)
                         .offset(y: thumbY)
                         .gesture(
                             DragGesture(minimumDistance: 0)
                                 .onChanged { value in
                                     isDragging = true
-                                    let newY = min(max(0, value.location.y - thumbSize / 2), trackHeight)
+                                    let newY = min(max(0, value.location.y - 4), trackHeight)
                                     let newPercent = 1.0 - (newY / trackHeight)
                                     let rawGain = minGain + Float(newPercent) * (maxGain - minGain)
                                     onGainChanged(abs(rawGain) < 0.4 ? 0.0 : Float(round(rawGain * 2) / 2))
@@ -215,7 +261,7 @@ struct EQBandControl: View {
 
             Text(band.label)
                 .font(.system(size: 8, weight: .semibold, design: .rounded))
-                .foregroundStyle(.primary)
+                .foregroundStyle(.secondary)
                 .frame(width: 40)
         }
         .frame(width: 42)

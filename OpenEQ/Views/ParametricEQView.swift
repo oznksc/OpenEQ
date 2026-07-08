@@ -30,16 +30,17 @@ private struct ParametricBandCard: View {
     let onEnabledChanged: (Bool) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 12) {
                 Text("B\(index + 1)")
-                    .font(.caption.weight(.semibold))
-                    .frame(width: 24)
+                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .foregroundStyle(band.isEnabled ? Color.accentColor : Color.secondary)
+                    .frame(width: 20, alignment: .leading)
 
                 Toggle("", isOn: enabledBinding)
                     .toggleStyle(.switch)
                     .controlSize(.small)
-                    .frame(width: 32)
+                    .labelsHidden()
 
                 Picker("", selection: filterTypeBinding) {
                     ForEach(EQFilterType.allCases) { ft in
@@ -48,52 +49,73 @@ private struct ParametricBandCard: View {
                 }
                 .labelsHidden()
                 .controlSize(.small)
-                .frame(width: 110)
+                .frame(width: 105)
+
+                Spacer()
 
                 HStack(spacing: 4) {
                     TextField("", value: frequencyBinding, format: .number.precision(.fractionLength(0)))
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 60)
-                        .font(.caption)
+                        .textFieldStyle(.plain)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(Color.primary.opacity(0.04))
+                        .cornerRadius(4)
+                        .frame(width: 50)
+                        .font(.system(size: 11, design: .monospaced))
                     Text("Hz")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(.tertiary)
                 }
             }
 
-            HStack(spacing: 10) {
-                Text("G")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .frame(width: 12)
+            HStack(spacing: 12) {
+                HStack(spacing: 6) {
+                    Text("GAIN")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(.tertiary)
+                        .frame(width: 30, alignment: .leading)
 
-                Slider(value: gainBinding, in: Double(EQBand.gainRange.lowerBound)...Double(EQBand.gainRange.upperBound), step: 0.5)
-                    .controlSize(.small)
+                    Slider(value: gainBinding, in: Double(EQBand.gainRange.lowerBound)...Double(EQBand.gainRange.upperBound), step: 0.5)
+                        .controlSize(.small)
 
-                Text(String(format: "%+.1f", band.gain))
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(gainColor)
-                    .frame(width: 44, alignment: .trailing)
+                    Text(String(format: "%+.1f dB", band.gain))
+                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(gainColor)
+                        .frame(width: 54, alignment: .trailing)
+                }
 
-                Text("Q")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .frame(width: 12)
+                Divider()
+                    .frame(height: 12)
+                    .opacity(0.5)
 
-                Slider(value: qBinding, in: Double(EQBand.qRange.lowerBound)...Double(EQBand.qRange.upperBound), step: 0.1)
-                    .controlSize(.small)
-                    .frame(width: 100)
+                HStack(spacing: 6) {
+                    Text("Q")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(.tertiary)
+                        .frame(width: 12, alignment: .leading)
 
-                Text(String(format: "%.1f", band.q))
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                    .frame(width: 28, alignment: .trailing)
+                    Slider(value: qBinding, in: Double(EQBand.qRange.lowerBound)...Double(EQBand.qRange.upperBound), step: 0.1)
+                        .controlSize(.small)
+                        .frame(width: 80)
+
+                    Text(String(format: "%.1f", band.q))
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 28, alignment: .trailing)
+                }
             }
         }
-        .padding(8)
-        .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(band.isEnabled ? 0.02 : 0.01)))
-        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.primary.opacity(0.05), lineWidth: 1))
-        .opacity(band.isEnabled ? 1.0 : 0.5)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color(nsColor: .controlBackgroundColor).opacity(band.isEnabled ? 0.4 : 0.2))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(band.isEnabled ? Color.accentColor.opacity(0.15) : Color.primary.opacity(0.04), lineWidth: 1)
+        )
+        .opacity(band.isEnabled ? 1.0 : 0.65)
     }
 
     private var enabledBinding: Binding<Bool> {

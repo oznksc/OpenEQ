@@ -56,7 +56,7 @@ struct SpectrumView: View {
                         var path = Path()
                         path.move(to: CGPoint(x: 0, y: y))
                         path.addLine(to: CGPoint(x: size.width, y: y))
-                        context.stroke(path, with: .color(Color.primary.opacity(0.04)), lineWidth: 1)
+                        context.stroke(path, with: .color(Color.white.opacity(0.06)), lineWidth: 1)
                     }
 
                     for index in 0..<barCount {
@@ -78,24 +78,24 @@ struct SpectrumView: View {
                         context.fill(Path(CGRect(x: x, y: peakY - 1, width: barWidth, height: 2)), with: .color(Color.teal.opacity(0.9)))
                     }
                 }
-                .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: .textBackgroundColor)))
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.primary.opacity(0.06), lineWidth: 1))
+                .background(RoundedRectangle(cornerRadius: 8).fill(Color(red: 0.075, green: 0.082, blue: 0.095)))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.08), lineWidth: 1))
                 .overlay(
                     Group {
                         if !levels.contains(where: { $0 > 0.025 }) {
                             VStack(spacing: 6) {
-                                Image(systemName: "music.note.house")
+                                Image(systemName: "waveform")
                                     .font(.system(size: 24))
-                                    .foregroundStyle(.secondary.opacity(0.7))
+                                    .foregroundStyle(.cyan.opacity(0.7))
                                 Text("No Audio Source")
                                     .font(.subheadline.weight(.semibold))
-                                    .foregroundStyle(.primary.opacity(0.8))
+                                    .foregroundStyle(.white.opacity(0.85))
                                 Text("Press ⌘O or click 'Open Audio'")
                                     .font(.caption)
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(.white.opacity(0.5))
                             }
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .background(Color(nsColor: .textBackgroundColor).opacity(0.96))
+                            .background(Color(red: 0.075, green: 0.082, blue: 0.095).opacity(0.96))
                             .cornerRadius(8)
                         }
                     }
@@ -103,15 +103,15 @@ struct SpectrumView: View {
             }
 
             HStack {
-                Text("20 Hz").font(.system(size: 9, weight: .medium, design: .monospaced)).foregroundStyle(.secondary)
+                Text("20 Hz").font(.system(size: 9, weight: .semibold, design: .monospaced)).foregroundStyle(.secondary)
                 Spacer()
-                Text("250 Hz").font(.system(size: 9, weight: .medium, design: .monospaced)).foregroundStyle(.secondary)
+                Text("250 Hz").font(.system(size: 9, weight: .semibold, design: .monospaced)).foregroundStyle(.secondary)
                 Spacer()
-                Text("1 kHz").font(.system(size: 9, weight: .medium, design: .monospaced)).foregroundStyle(.secondary)
+                Text("1 kHz").font(.system(size: 9, weight: .semibold, design: .monospaced)).foregroundStyle(.secondary)
                 Spacer()
-                Text("4 kHz").font(.system(size: 9, weight: .medium, design: .monospaced)).foregroundStyle(.secondary)
+                Text("4 kHz").font(.system(size: 9, weight: .semibold, design: .monospaced)).foregroundStyle(.secondary)
                 Spacer()
-                Text("20 kHz").font(.system(size: 9, weight: .medium, design: .monospaced)).foregroundStyle(.secondary)
+                Text("20 kHz").font(.system(size: 9, weight: .semibold, design: .monospaced)).foregroundStyle(.secondary)
             }
             .padding(.horizontal, 8)
         }

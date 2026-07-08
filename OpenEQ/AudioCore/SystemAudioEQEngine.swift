@@ -17,12 +17,12 @@ final class SystemAudioEQEngine {
 
     private let ioQueue = DispatchQueue(label: "com.openeq.system-audio-eq.io", qos: .userInteractive)
     private var tapID = AudioObjectID(kAudioObjectUnknown)
-    private var aggregateDeviceID = AudioObjectID(kAudioObjectUnknown)
+    private var aggDeviceID = AudioObjectID(kAudioObjectUnknown)
     private var aggIOProcID: AudioDeviceIOProcID?
+    private var origOutputID = AudioObjectID(kAudioObjectUnknown)
     private var isRunning = false
     private var sampleRate: Double = 48000
     private var lastEQPreset: EQPreset?
-    private var ringBuffer: RingBuffer?
 
     func start(with preset: EQPreset) {
         guard #available(macOS 14.2, *) else {
@@ -32,14 +32,16 @@ final class SystemAudioEQEngine {
         stop()
         lastEQPreset = preset
         do {
+            origOutputID = try getDefaultOutputDeviceID()
             try setupTap()
             try setupAggregateWithOutput()
-            try startAggregateIO()
+            try setDefaultOutput(aggDeviceID)
+            try startAggIO()
             isRunning = true
             latencyEstimate = Double(1024) / sampleRate * 3
             status = .running
             onStatusChanged?(.running)
-            logger.info("System-wide EQ started")
+            logger.info("System-wide EQ started on aggregate device")
         } catch {
             cleanup()
             let msg = (error as? SystemAudioEQError)?.localizedDescription ?? error.localizedDescription
@@ -51,13 +53,15 @@ final class SystemAudioEQEngine {
 
     func stop() {
         guard isRunning else { return }
-        stopAggregateIO()
+        if origOutputID != kAudioObjectUnknown {
+            try? setDefaultOutput(origOutputID)
+        }
+        stopAggIO()
         destroyAggregate()
         destroyTap()
         isRunning = false
         status = .stopped
         latencyEstimate = nil
-        ringBuffer = nil
         onStatusChanged?(.stopped)
         logger.info("System-wide EQ stopped")
     }
@@ -83,9 +87,8 @@ final class SystemAudioEQEngine {
     }
 
     private func setupAggregateWithOutput() throws {
+        let outputUID = try getDeviceUID(origOutputID)
         let tapUID = try getTapUID()
-        let outputID = try getDefaultOutputDeviceID()
-        let outputUID = try getDeviceUID(outputID)
         let aggUID = "com.openeq.agg.\(UUID().uuidString)"
 
         let subDevices = [[kAudioSubDeviceUIDKey: outputUID]]
@@ -99,7 +102,7 @@ final class SystemAudioEQEngine {
         var newAggID = AudioObjectID(kAudioObjectUnknown)
         var err = AudioHardwareCreateAggregateDevice(desc as CFDictionary, &newAggID)
         guard err == noErr else { throw SystemAudioEQError.failed("Create aggregate: \(err)") }
-        aggregateDeviceID = newAggID
+        aggDeviceID = newAggID
 
         var addr = AudioObjectPropertyAddress(
             mSelector: kAudioAggregateDevicePropertyTapList,
@@ -108,61 +111,74 @@ final class SystemAudioEQEngine {
         )
         var list: CFArray? = [tapUID] as CFArray
         err = withUnsafeMutablePointer(to: &list) { ptr in
-            AudioObjectSetPropertyData(aggregateDeviceID, &addr, UInt32(0), nil, UInt32(MemoryLayout<CFArray>.size), ptr)
+            AudioObjectSetPropertyData(aggDeviceID, &addr, UInt32(0), nil, UInt32(MemoryLayout<CFArray>.size), ptr)
         }
         guard err == noErr else { throw SystemAudioEQError.failed("Set tap list: \(err)") }
 
         logger.info("Aggregate device created with output + tap")
     }
 
-    private func startAggregateIO() throws {
-        let ringCapacity = Int(sampleRate * 0.3) * 2
-        ringBuffer = RingBuffer(capacity: ringCapacity)
+    private func startAggIO() throws {
         let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 2)!
 
         var procID: AudioDeviceIOProcID?
-        let err = AudioDeviceCreateIOProcIDWithBlock(&procID, aggregateDeviceID, ioQueue) {
-            [weak self] (inNow: UnsafePointer<AudioTimeStamp>,
-                         inInputData: UnsafePointer<AudioBufferList>?,
-                         inInputTime: UnsafePointer<AudioTimeStamp>?,
-                         outOutputData: UnsafeMutablePointer<AudioBufferList>?,
-                         inOutputTime: UnsafePointer<AudioTimeStamp>?) in
-            guard let inData = inInputData, let outData = outOutputData else { return }
-            self?.handleIO(inData: inData, outData: outData, format: format)
+        let err = AudioDeviceCreateIOProcIDWithBlock(&procID, aggDeviceID, ioQueue) {
+            [weak self] (_, inInputData, _, outOutputData, _) in
+            guard let self else { return }
+            self.handleIO(inData: inInputData, outData: outOutputData, format: format)
         }
         guard err == noErr, let procID else {
             throw SystemAudioEQError.failed("Create IOProc: \(err)")
         }
         aggIOProcID = procID
-        AudioDeviceStart(aggregateDeviceID, procID)
+        AudioDeviceStart(aggDeviceID, procID)
     }
 
     // MARK: - IO
 
+    private nonisolated(unsafe) static var testPhase: Float = 0
+
     private func handleIO(inData: UnsafePointer<AudioBufferList>, outData: UnsafeMutablePointer<AudioBufferList>, format: AVAudioFormat) {
-        let inBuffers = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: inData))
         let outBuffers = UnsafeMutableAudioBufferListPointer(outData)
-
-        guard let inFirst = inBuffers.first, let inBufData = inFirst.mData else { return }
-        let frameLength = Int(inFirst.mDataByteSize) / MemoryLayout<Float>.size
-        guard frameLength > 0 else { return }
-
-        let preset = lastEQPreset ?? EQPreset.flatPreset()
         let channelCount = Int(format.channelCount)
 
-        var processedData = Data(count: Int(inFirst.mDataByteSize))
-        processedData.withUnsafeMutableBytes { destPtr in
-            guard let dest = destPtr.baseAddress?.assumingMemoryBound(to: Float.self) else { return }
+        if let inBuf = (UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: inData))).first,
+           let inBufData = inBuf.mData, inBuf.mDataByteSize > 0 {
+            let inSamples = Int(inBuf.mDataByteSize) / MemoryLayout<Float>.size
+            let inFrames = inSamples / channelCount
             let src = inBufData.assumingMemoryBound(to: Float.self)
-            memcpy(dest, src, Int(inFirst.mDataByteSize))
-            applyEQ(dest, frames: frameLength / channelCount, channels: channelCount, preset: preset)
-            if let outFirst = outBuffers.first, let outDataPtr = outFirst.mData {
-                memcpy(outDataPtr, dest, Int(inFirst.mDataByteSize))
+            let preset = lastEQPreset ?? EQPreset.flatPreset()
+            for outBuf in outBuffers {
+                guard let outPtr = outBuf.mData else { continue }
+                let outBytes = Int(outBuf.mDataByteSize)
+                let dest = outPtr.assumingMemoryBound(to: Float.self)
+                let copySamples = min(outBytes / MemoryLayout<Float>.size, inSamples)
+                if copySamples > 0 {
+                    memcpy(dest, src, copySamples * MemoryLayout<Float>.size)
+                    applyEQ(dest, frames: inFrames, channels: channelCount, preset: preset)
+                }
+                if copySamples < outBytes / MemoryLayout<Float>.size {
+                    memset(dest + copySamples, 0, outBytes - copySamples * MemoryLayout<Float>.size)
+                }
             }
-        }
-
-        if let analysis = analyzer.analyze(bufferList: inData, frameLength: frameLength, sampleRate: sampleRate) {
-            DispatchQueue.main.async { [weak self] in self?.onAnalysis?(analysis) }
+            if let analysis = analyzer.analyze(bufferList: inData, frameLength: inSamples, sampleRate: sampleRate) {
+                DispatchQueue.main.async { [weak self] in self?.onAnalysis?(analysis) }
+            }
+        } else {
+            for outBuf in outBuffers {
+                guard let ptr = outBuf.mData, outBuf.mDataByteSize > 0 else { continue }
+                let totalSamples = Int(outBuf.mDataByteSize) / MemoryLayout<Float>.size
+                let frames = totalSamples / channelCount
+                let outF = ptr.assumingMemoryBound(to: Float.self)
+                for ch in 0..<channelCount {
+                    let cd = outF.advanced(by: ch * frames)
+                    for i in 0..<frames {
+                        cd[i] = sin(Self.testPhase) * 0.02
+                        Self.testPhase += 2 * Float.pi * 440 / Float(sampleRate)
+                        if Self.testPhase > 2 * Float.pi { Self.testPhase -= 2 * Float.pi }
+                    }
+                }
+            }
         }
     }
 
@@ -232,53 +248,31 @@ final class SystemAudioEQEngine {
         return uid as String
     }
 
+    private func setDefaultOutput(_ deviceID: AudioDeviceID) throws {
+        var addr = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyDefaultOutputDevice, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+        var id = deviceID
+        let err = AudioObjectSetPropertyData(kOpenEQSysObj, &addr, UInt32(0), nil, UInt32(MemoryLayout<AudioDeviceID>.size), &id)
+        guard err == noErr else { throw SystemAudioEQError.failed("Set default output: \(err)") }
+    }
+
     // MARK: - Cleanup
 
-    private func stopAggregateIO() {
-        if let p = aggIOProcID, aggregateDeviceID != kAudioObjectUnknown {
-            AudioDeviceStop(aggregateDeviceID, p); AudioDeviceDestroyIOProcID(aggregateDeviceID, p)
+    private func stopAggIO() {
+        if let p = aggIOProcID, aggDeviceID != kAudioObjectUnknown {
+            AudioDeviceStop(aggDeviceID, p); AudioDeviceDestroyIOProcID(aggDeviceID, p)
         }
         aggIOProcID = nil
     }
 
     private func destroyAggregate() {
-        if aggregateDeviceID != kAudioObjectUnknown { AudioHardwareDestroyAggregateDevice(aggregateDeviceID); aggregateDeviceID = kAudioObjectUnknown }
+        if aggDeviceID != kAudioObjectUnknown { AudioHardwareDestroyAggregateDevice(aggDeviceID); aggDeviceID = kAudioObjectUnknown }
     }
 
     private func destroyTap() {
         if tapID != kAudioObjectUnknown { AudioHardwareDestroyProcessTap(tapID); tapID = kAudioObjectUnknown }
     }
 
-    private func cleanup() { stopAggregateIO(); destroyAggregate(); destroyTap(); ringBuffer = nil }
-}
-
-private class RingBuffer {
-    private var buf: Data
-    private let cap: Int
-    private var w = 0, r = 0
-    private let lock = NSLock()
-    init(capacity: Int) { cap = max(capacity, 4096); buf = Data(count: cap) }
-    func write(data: Data, frameLength: Int) {
-        lock.lock(); defer { lock.unlock() }
-        let bytes = min(data.count, cap)
-        data.withUnsafeBytes { src in guard let s=src.baseAddress else { return }
-            buf.withUnsafeMutableBytes { dst in guard let d=dst.baseAddress else { return }
-                let sp = cap - w
-                if bytes <= sp { memcpy(d+w, s, bytes) } else { memcpy(d+w, s, sp); memcpy(d, s+sp, bytes-sp) }
-            }
-        }
-        w = (w + bytes) % cap; if w == r { r = (r + bytes) % cap }
-    }
-    func read(into dest: UnsafeMutableRawPointer, maxBytes: Int) -> Int {
-        lock.lock(); defer { lock.unlock() }
-        let avail = (w - r + cap) % cap; let toR = min(maxBytes, avail)
-        guard toR > 0 else { return 0 }
-        buf.withUnsafeBytes { src in guard let s=src.baseAddress else { return }
-            let sp = cap - r
-            if toR <= sp { memcpy(dest, s+r, toR) } else { memcpy(dest, s+r, sp); memcpy(dest+sp, s, toR-sp) }
-        }
-        r = (r + toR) % cap; return toR
-    }
+    private func cleanup() { stopAggIO(); destroyAggregate(); destroyTap() }
 }
 
 enum SystemAudioEQError: LocalizedError {

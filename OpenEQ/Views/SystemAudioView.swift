@@ -81,9 +81,11 @@ struct SystemAudioView: View {
                         .font(.caption2)
                         .foregroundStyle(.orange)
 
-                    Label("External Loopback requires BlackHole 2ch virtual device installed", systemImage: "exclamationmark.triangle")
-                        .font(.caption2)
-                        .foregroundStyle(.orange)
+                    if viewModel.systemAudioMode == .externalLoopback {
+                        Label("External Loopback requires BlackHole 2ch virtual device installed", systemImage: "exclamationmark.triangle")
+                            .font(.caption2)
+                            .foregroundStyle(.orange)
+                    }
                 }
                 .padding(10)
                 .background(Color.primary.opacity(0.03))
@@ -124,35 +126,22 @@ struct SystemAudioView: View {
     }
 
     private var systemEQControls: some View {
-        HStack(spacing: 8) {
-            Button {
-                if viewModel.systemAudioStatus == .running {
-                    viewModel.stopSystemEQMode()
-                } else {
-                    viewModel.startSystemEQMode()
-                }
-            } label: {
-                Label(
-                    viewModel.systemAudioStatus == .running ? "Stop" : "Start",
-                    systemImage: viewModel.systemAudioStatus == .running ? "stop.fill" : "play.fill"
-                )
-                .font(.caption)
-                .frame(maxWidth: .infinity)
+        Button {
+            if viewModel.systemAudioStatus == .running {
+                viewModel.stopSystemEQMode()
+            } else {
+                viewModel.startSystemEQMode()
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.small)
-
-            Button {
-                viewModel.setSystemAudiBypassed(!viewModel.isExternalLoopbackBypassed)
-            } label: {
-                Label("Bypass", systemImage: "power")
-                    .font(.caption)
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            .tint(viewModel.isExternalLoopbackBypassed ? .orange : nil)
+        } label: {
+            Label(
+                viewModel.systemAudioStatus == .running ? "Stop" : "Start",
+                systemImage: viewModel.systemAudioStatus == .running ? "stop.fill" : "play.fill"
+            )
+            .font(.caption)
+            .frame(maxWidth: .infinity)
         }
+        .buttonStyle(.borderedProminent)
+        .controlSize(.small)
     }
 
     private var systemEQStatus: some View {

@@ -83,8 +83,10 @@ struct PresetPanelView: View {
                 .controlSize(.small)
             }
         }
-        .padding(14)
-        .background(Color(nsColor: .controlBackgroundColor))
+        .padding(.horizontal, 16)
+        .padding(.top, 16)
+        .padding(.bottom, 8)
+        .background(Color.clear)
     }
 
     @ViewBuilder
@@ -93,13 +95,13 @@ struct PresetPanelView: View {
 
         HStack {
             Button(action: { viewModel.applyPreset(preset) }) {
-                HStack(spacing: 6) {
-                    Image(systemName: isCustom ? "person.circle.fill" : "music.note")
-                        .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+                HStack(spacing: 8) {
+                    Image(systemName: isCustom ? "person.fill" : "slider.horizontal.3")
+                        .foregroundStyle(isSelected ? Color.accentColor : Color.secondary.opacity(0.8))
                         .font(.system(size: 10))
 
                     Text(preset.name)
-                        .font(.caption.weight(isSelected ? .semibold : .regular))
+                        .font(.system(size: 12, weight: isSelected ? .medium : .regular))
                         .foregroundStyle(isSelected ? .primary : .secondary)
                         .lineLimit(1)
 
@@ -107,7 +109,7 @@ struct PresetPanelView: View {
 
                     if isSelected {
                         Image(systemName: "checkmark")
-                            .font(.caption2.weight(.bold))
+                            .font(.system(size: 9, weight: .bold))
                             .foregroundStyle(.tint)
                     }
                 }
@@ -116,17 +118,17 @@ struct PresetPanelView: View {
             .buttonStyle(.plain)
 
             if isCustom {
-                HStack(spacing: 4) {
+                HStack(spacing: 6) {
                     Button(action: { viewModel.exportPreset(preset) }) {
                         Image(systemName: "square.and.arrow.up")
-                            .font(.system(size: 9))
+                            .font(.system(size: 10))
                             .foregroundStyle(.secondary)
                     }
                     .buttonStyle(.plain)
 
                     Button(action: { viewModel.deletePreset(id: preset.id) }) {
                         Image(systemName: "trash")
-                            .font(.system(size: 9))
+                            .font(.system(size: 10))
                             .foregroundStyle(hoveredPresetId == preset.id ? Color.red : Color.secondary.opacity(0.6))
                     }
                     .buttonStyle(.plain)
@@ -134,10 +136,10 @@ struct PresetPanelView: View {
             }
         }
         .padding(.horizontal, 8)
-        .padding(.vertical, 6)
+        .padding(.vertical, 5)
         .background(
-            RoundedRectangle(cornerRadius: 5)
-                .fill(isSelected ? Color.accentColor.opacity(0.1) : Color.clear)
+            RoundedRectangle(cornerRadius: 6)
+                .fill(isSelected ? Color.accentColor.opacity(0.08) : (hoveredPresetId == preset.id ? Color.primary.opacity(0.03) : Color.clear))
         )
         .onHover { hovering in
             hoveredPresetId = hovering ? preset.id : (hoveredPresetId == preset.id ? nil : hoveredPresetId)
@@ -157,4 +159,5 @@ struct PresetPanelView: View {
         viewModel: OpenEQViewModel(audioEngineController: AudioEngineController())
     )
     .frame(width: 280, height: 500)
+    .background(Color(nsColor: .windowBackgroundColor))
 }

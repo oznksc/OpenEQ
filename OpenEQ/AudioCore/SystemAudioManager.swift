@@ -188,6 +188,7 @@ final class SystemAudioManager {
     }
 
     private func updateStatusForCurrentMode() {
+        if status == .running, deviceManager.lastError == nil { return }
         if let err = deviceManager.lastError {
             status = .failed(err.localizedDescription); return
         }

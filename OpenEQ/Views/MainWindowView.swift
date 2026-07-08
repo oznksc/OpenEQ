@@ -9,13 +9,15 @@ struct MainWindowView: View {
 
             VStack(spacing: 0) {
                 header
-                    .frame(height: 44)
+                    .frame(height: 52)
+                    .background(Color(nsColor: .windowBackgroundColor))
 
                 Divider()
+                    .opacity(0.4)
 
                 HStack(spacing: 0) {
                     ScrollView(.vertical, showsIndicators: false) {
-                        VStack(spacing: 0) {
+                        VStack(spacing: 16) {
                             SpectrumView(
                                 title: viewModel.spectrumTitle,
                                 warning: viewModel.spectrumWarning,
@@ -25,34 +27,43 @@ struct MainWindowView: View {
                                 peakLevel: viewModel.peakLevel,
                                 isClipping: viewModel.isClipping
                             )
-                            .frame(minHeight: 160)
-
-                            Divider()
+                            .frame(minHeight: 180)
+                            .background(Color(nsColor: .windowBackgroundColor))
+                            .cornerRadius(12)
 
                             EqualizerView(viewModel: viewModel)
+                                .background(Color(nsColor: .windowBackgroundColor))
+                                .cornerRadius(12)
                         }
+                        .padding(16)
                     }
                     .layoutPriority(1)
 
                     Divider()
+                        .opacity(0.4)
 
                     ScrollView(.vertical, showsIndicators: false) {
-                        VStack(spacing: 0) {
+                        VStack(spacing: 12) {
                             PresetPanelView(viewModel: viewModel)
 
                             Divider()
+                                .opacity(0.3)
+                                .padding(.horizontal, 16)
 
                             SponsorView(sponsors: viewModel.sponsors)
-                                .padding(12)
+                                .padding(.horizontal, 16)
+                                .padding(.bottom, 16)
                         }
                     }
                     .frame(width: sidebarWidth)
+                    .background(Color(nsColor: .controlBackgroundColor).opacity(0.2))
                 }
 
                 Divider()
+                    .opacity(0.4)
 
                 PlayerControlsView(viewModel: viewModel)
-                    .frame(height: 48)
+                    .frame(height: 56)
             }
             .background(Color(nsColor: .windowBackgroundColor))
         }
@@ -62,23 +73,23 @@ struct MainWindowView: View {
     }
 
     private var header: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 12) {
             ZStack {
                 RoundedRectangle(cornerRadius: 8)
                     .fill(LinearGradient(
-                        colors: [.cyan, .blue],
+                        colors: [.cyan.opacity(0.9), .blue.opacity(0.9)],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
                     ))
                     .frame(width: 28, height: 28)
 
                 Image(systemName: "slider.vertical.3")
-                    .font(.caption.weight(.bold))
+                    .font(.system(size: 13, weight: .bold))
                     .foregroundStyle(.white)
             }
 
             Text("OpenEQ")
-                .font(.system(.title3, design: .rounded).weight(.bold))
+                .font(.system(.title3, design: .rounded).weight(.semibold))
 
             Spacer()
 
@@ -86,7 +97,7 @@ struct MainWindowView: View {
                 viewModel.isShowingSystemAudio = true
             } label: {
                 Label("System Audio", systemImage: "speaker.wave.2")
-                    .font(.caption)
+                    .font(.system(size: 11, weight: .medium))
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
@@ -96,14 +107,14 @@ struct MainWindowView: View {
                     .fill(statusColor)
                     .frame(width: 6, height: 6)
 
-                Text(viewModel.playbackState.title)
-                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                Text(viewModel.playbackState.title.uppercased())
+                    .font(.system(size: 9, weight: .bold, design: .monospaced))
                     .foregroundStyle(.secondary)
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 4)
             .background(Color.primary.opacity(0.04))
-            .cornerRadius(14)
+            .cornerRadius(12)
         }
         .padding(.horizontal, 16)
     }
