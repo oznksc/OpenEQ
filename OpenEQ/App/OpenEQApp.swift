@@ -1,7 +1,18 @@
 import SwiftUI
+import AppKit
+
+@MainActor
+final class OpenEQAppDelegate: NSObject, NSApplicationDelegate {
+    weak var viewModel: OpenEQViewModel?
+
+    func applicationWillTerminate(_ notification: Notification) {
+        viewModel?.shutdown()
+    }
+}
 
 @main
 struct OpenEQApp: App {
+    @NSApplicationDelegateAdaptor(OpenEQAppDelegate.self) private var appDelegate
     @State private var viewModel = OpenEQViewModel(
         audioEngineController: AudioEngineController()
     )
@@ -9,6 +20,7 @@ struct OpenEQApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView(viewModel: viewModel)
+                .onAppear { appDelegate.viewModel = viewModel }
         }
         .windowResizability(.contentMinSize)
         .defaultSize(width: 1100, height: 700)

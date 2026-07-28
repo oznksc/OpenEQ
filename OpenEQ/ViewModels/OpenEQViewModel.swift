@@ -102,8 +102,12 @@ final class OpenEQViewModel {
     var presets: [EQPreset]
     var userPresets: [EQPreset] = []
     var selectedPreset: EQPreset
-    var volume: Double
-    var isMuted: Bool
+    var volume: Double {
+        didSet { audioEngineController.setVolume(volume) }
+    }
+    var isMuted: Bool {
+        didSet { audioEngineController.setMuted(isMuted) }
+    }
     var systemAudioMode: SystemAudioMode
     var systemAudioStatus: SystemAudioStatus
     var selectedSystemInputDevice: AudioDevice?
@@ -114,6 +118,14 @@ final class OpenEQViewModel {
     var externalLoopbackLatency: TimeInterval?
     var isExternalLoopbackBypassed: Bool
     var systemAudioLatency: TimeInterval?
+
+    var playbackDuration: TimeInterval {
+        audioEngineController.playbackDuration
+    }
+
+    var playbackPosition: TimeInterval {
+        audioEngineController.playbackPosition
+    }
 
     private let audioEngineController: AudioEngineController
     private let systemAudioManager: SystemAudioManager
@@ -161,6 +173,8 @@ final class OpenEQViewModel {
 
         self.audioEngineController.currentGraphicBandCount = .ten
         self.audioEngineController.applyPreset(initialPreset)
+        self.audioEngineController.setVolume(volume)
+        self.audioEngineController.setMuted(isMuted)
     }
 
     // MARK: - Playback Controls
@@ -182,6 +196,10 @@ final class OpenEQViewModel {
         audioEngineController.stop()
     }
 
+    func seek(to time: TimeInterval) {
+        audioEngineController.seek(to: time)
+    }
+
     func togglePlayback() {
         switch playbackState {
         case .playing:
@@ -199,6 +217,7 @@ final class OpenEQViewModel {
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
+        panel.allowsOtherFileTypes = true
         
         panel.allowedContentTypes = [
             .audio,
@@ -279,13 +298,19 @@ final class OpenEQViewModel {
         syncSystemAudioState()
     }
 
+    func shutdown() {
+        stop()
+        systemAudioManager.stop()
+        syncSystemAudioState()
+    }
+
     func restartExternalLoopbackMode() {
         systemAudioManager.restartExternalLoopback(preset: currentLoopbackPreset())
         syncSystemAudioState()
     }
 
-    func setSystemAudiBypassed(_ isBypassed: Bool) {
-        systemAudioManager.setSystemAudiBypassed(isBypassed)
+    func setSystemAudioBypassed(_ isBypassed: Bool) {
+        systemAudioManager.setSystemAudioBypassed(isBypassed)
         syncSystemAudioState()
     }
 
@@ -593,7 +618,7 @@ final class OpenEQViewModel {
             return
         }
 
-        systemAudioManager.updateSystemAudiEQ(currentLoopbackPreset())
+        systemAudioManager.updateSystemAudioEQ(currentLoopbackPreset())
         syncSystemAudioState()
     }
 

@@ -115,12 +115,12 @@ final class SystemAudioManager {
         if mode == .systemEQ { status = .stopped }
     }
 
-    func updateSystemAudiEQ(_ preset: EQPreset) {
+    func updateSystemAudioEQ(_ preset: EQPreset) {
         guard mode == .systemEQ else { return }
         systemAudioEQEngine.updateEQ(preset)
     }
 
-    func setSystemAudiBypassed(_ bypassed: Bool) {
+    func setSystemAudioBypassed(_ bypassed: Bool) {
         guard mode == .systemEQ else { return }
         systemAudioEQEngine.setBypassed(bypassed)
     }

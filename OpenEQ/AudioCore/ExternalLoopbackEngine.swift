@@ -48,21 +48,23 @@ final class ExternalLoopbackEngine {
     func start(inputDevice: AudioDevice?, outputDevice: AudioDevice?, preset: EQPreset) {
         configure(inputDevice: inputDevice, outputDevice: outputDevice)
         currentPreset = preset
+        stop()
 
         do {
             try validateRouting()
-            stop()
-            configureGraph()
+            try configureGraph()
             updateEQ(preset)
-            installAnalyzerTap()
+            try installAnalyzerTap()
             try engine.start()
             latencyEstimate = estimateLatency()
             status = .running
             logger.info("External loopback engine started.")
         } catch let error as ExternalLoopbackError {
+            cleanupAfterFailedStart()
             status = .failed(error.localizedDescription)
             logger.error(error.localizedDescription)
         } catch {
+            cleanupAfterFailedStart()
             status = .failed(error.localizedDescription)
             logger.error(error.localizedDescription)
         }
@@ -95,10 +97,14 @@ final class ExternalLoopbackEngine {
         limiter.bypass = false
     }
 
-    private func configureGraph() {
+    private func configureGraph() throws {
         let input = engine.inputNode
         let mixer = engine.mainMixerNode
         let inputFormat = input.outputFormat(forBus: 0)
+
+        guard inputFormat.channelCount > 0, inputFormat.sampleRate > 0 else {
+            throw ExternalLoopbackError.invalidAudioFormat
+        }
 
         if eq.engine == nil {
             engine.attach(eq)
@@ -164,10 +170,14 @@ final class ExternalLoopbackEngine {
         }
     }
 
-    private func installAnalyzerTap() {
+    private func installAnalyzerTap() throws {
         guard !isTapInstalled else { return }
 
         let format = engine.mainMixerNode.outputFormat(forBus: 0)
+        guard format.channelCount > 0, format.sampleRate > 0 else {
+            throw ExternalLoopbackError.invalidAudioFormat
+        }
+
         engine.mainMixerNode.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
             guard let self, let analysis = self.analyzer.analyze(buffer: buffer) else {
                 return
@@ -178,6 +188,13 @@ final class ExternalLoopbackEngine {
             }
         }
         isTapInstalled = true
+    }
+
+    private func cleanupAfterFailedStart() {
+        removeAnalyzerTap()
+        engine.stop()
+        engine.reset()
+        latencyEstimate = nil
     }
 
     private func removeAnalyzerTap() {
@@ -199,6 +216,7 @@ private enum ExternalLoopbackError: LocalizedError {
     case missingOutput
     case feedbackRisk(String)
     case deviceBindingUnavailable(String)
+    case invalidAudioFormat
 
     var errorDescription: String? {
         switch self {
@@ -210,6 +228,8 @@ private enum ExternalLoopbackError: LocalizedError {
             return message
         case .deviceBindingUnavailable(let message):
             return message
+        case .invalidAudioFormat:
+            return "The selected audio route does not expose a usable PCM format."
         }
     }
 }

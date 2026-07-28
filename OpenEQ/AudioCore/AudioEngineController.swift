@@ -21,6 +21,9 @@ final class AudioEngineController {
 
     private var volumeBoostMultiplier: Float = 1.0
     private var currentPreampGain: Float = 0.0
+    private var outputVolume: Float = 1.0
+    private var isMuted = false
+    private var storedPlaybackPosition: TimeInterval = 0
 
     private let logger = AppLogger(category: "AudioEngine")
     private let engine = AVAudioEngine()
@@ -33,6 +36,7 @@ final class AudioEngineController {
     private var isGraphConnected = false
     private var isTapInstalled = false
     private var lastProcessingFormat: AVAudioFormat?
+    private var playbackGeneration: UInt64 = 0
 
     init() {
         configureEQ()
@@ -43,6 +47,23 @@ final class AudioEngineController {
     }
 
     var currentGraphicBandCount: GraphicBandCount = .ten
+
+    var playbackDuration: TimeInterval {
+        guard let audioFile, audioFile.processingFormat.sampleRate > 0 else { return 0 }
+        return Double(audioFile.length) / audioFile.processingFormat.sampleRate
+    }
+
+    var playbackPosition: TimeInterval {
+        guard playbackState == .playing,
+              let renderTime = player.lastRenderTime,
+              let playerTime = player.playerTime(forNodeTime: renderTime),
+              playerTime.sampleRate > 0 else {
+            return storedPlaybackPosition
+        }
+
+        let position = max(0, Double(playerTime.sampleTime) / playerTime.sampleRate)
+        return min(playbackDuration, position)
+    }
 
     private func configureEQ() {
         let defaultBands = EQBand.defaultBands(count: .thirtyOne)
@@ -154,7 +175,8 @@ final class AudioEngineController {
         lastProcessingFormat = newFormat
         audioFile = file
         currentFileURL = url
-        player.scheduleFile(file, at: nil, completionHandler: nil)
+        storedPlaybackPosition = 0
+        scheduleCurrentFile()
         playbackState = .ready
         logger.info("Audio file ready: \(url.lastPathComponent)")
     }
@@ -187,6 +209,7 @@ final class AudioEngineController {
 
     func pause() {
         guard playbackState == .playing else { return }
+        storedPlaybackPosition = playbackPosition
         player.pause()
         playbackState = .paused
         removeTap()
@@ -198,6 +221,8 @@ final class AudioEngineController {
     }
 
     private func stop(clearFile: Bool) {
+        playbackGeneration &+= 1
+        storedPlaybackPosition = 0
         removeTap()
         player.stop()
         engine.pause()
@@ -206,8 +231,8 @@ final class AudioEngineController {
             audioFile = nil
             currentFileURL = nil
             playbackState = .idle
-        } else if let file = audioFile {
-            player.scheduleFile(file, at: nil, completionHandler: nil)
+        } else if audioFile != nil {
+            scheduleCurrentFile()
             playbackState = .stopped
         } else {
             playbackState = .idle
@@ -215,6 +240,32 @@ final class AudioEngineController {
         
         resetAnalysisState()
         logger.info("Playback stopped")
+    }
+
+    private func scheduleCurrentFile() {
+        guard let audioFile else { return }
+        let generation = playbackGeneration
+        player.scheduleFile(audioFile, at: nil) { [weak self] in
+            DispatchQueue.main.async { [weak self] in
+                self?.finishPlayback(generation: generation)
+            }
+        }
+    }
+
+    private func finishPlayback(generation: UInt64) {
+        guard generation == playbackGeneration,
+              playbackState == .playing else {
+            return
+        }
+
+        removeTap()
+        player.stop()
+        engine.pause()
+        playbackState = .stopped
+        storedPlaybackPosition = playbackDuration
+        resetAnalysisState()
+        scheduleCurrentFile()
+        logger.info("Playback finished")
     }
 
     func restart() {
@@ -229,6 +280,60 @@ final class AudioEngineController {
 
     func seekToStart() {
         restart()
+    }
+
+    func seek(to time: TimeInterval) {
+        guard let audioFile,
+              audioFile.processingFormat.sampleRate > 0 else {
+            return
+        }
+
+        let duration = playbackDuration
+        let clampedTime = max(0, min(duration, time))
+        let startFrame = min(
+            AVAudioFramePosition(clampedTime * audioFile.processingFormat.sampleRate),
+            audioFile.length
+        )
+        let remainingFrames = AVAudioFrameCount(max(0, audioFile.length - startFrame))
+        let wasPlaying = playbackState == .playing
+
+        playbackGeneration &+= 1
+        removeTap()
+        player.stop()
+        engine.pause()
+        storedPlaybackPosition = clampedTime
+
+        guard remainingFrames > 0 else {
+            playbackState = .stopped
+            storedPlaybackPosition = duration
+            resetAnalysisState()
+            return
+        }
+
+        let generation = playbackGeneration
+        player.scheduleSegment(
+            audioFile,
+            startingFrame: startFrame,
+            frameCount: remainingFrames,
+            at: nil
+        ) { [weak self] in
+            DispatchQueue.main.async { [weak self] in
+                self?.finishPlayback(generation: generation)
+            }
+        }
+
+        if wasPlaying {
+            do {
+                try startEngineIfNeeded()
+                player.play()
+                playbackState = .playing
+                installTap()
+            } catch {
+                fail(error)
+            }
+        } else {
+            playbackState = .paused
+        }
     }
 
     func teardown() {
@@ -309,6 +414,16 @@ final class AudioEngineController {
         applyVolume()
     }
 
+    func setVolume(_ volume: Double) {
+        outputVolume = Float(max(0, min(2, volume)))
+        applyVolume()
+    }
+
+    func setMuted(_ muted: Bool) {
+        isMuted = muted
+        applyVolume()
+    }
+
     func setPreampGain(_ gain: Float) {
         let clampedGain = max(EQBand.gainRange.lowerBound, min(EQBand.gainRange.upperBound, gain))
         currentPreampGain = clampedGain
@@ -318,7 +433,7 @@ final class AudioEngineController {
 
     private func applyVolume() {
         let preampVolume = pow(10.0, currentPreampGain / 20.0)
-        player.volume = preampVolume * volumeBoostMultiplier
+        player.volume = isMuted ? 0 : outputVolume * preampVolume * volumeBoostMultiplier
     }
 
     func applyPreset(_ preset: EQPreset) {

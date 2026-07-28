@@ -5,11 +5,12 @@ struct PlayerControlsView: View {
     @Bindable var viewModel: OpenEQViewModel
 
     @State private var currentTime: Double = 0.0
-    private let totalDuration: Double = 214.0
     @State private var rotationAngle: Double = 0.0
     private let timer = Timer.publish(every: 0.1, on: .main, in: .common).autoconnect()
 
     var body: some View {
+        let duration = max(viewModel.playbackDuration, 1)
+
         VStack(spacing: 0) {
             if let error = viewModel.errorMessage {
                 HStack(spacing: 6) {
@@ -121,11 +122,19 @@ struct PlayerControlsView: View {
                         .foregroundStyle(.secondary)
                         .frame(width: 32, alignment: .leading)
 
-                    Slider(value: Binding(get: { currentTime }, set: { currentTime = $0 }), in: 0...totalDuration)
+                    Slider(
+                        value: Binding(get: { currentTime }, set: { currentTime = $0 }),
+                        in: 0...duration,
+                        onEditingChanged: { isEditing in
+                            if !isEditing {
+                                viewModel.seek(to: currentTime)
+                            }
+                        }
+                    )
                         .disabled(viewModel.selectedFileURL == nil)
                         .controlSize(.small)
 
-                    Text(formatTime(totalDuration))
+                    Text(formatTime(viewModel.playbackDuration))
                         .font(.system(size: 10, weight: .medium, design: .monospaced))
                         .foregroundStyle(.secondary)
                         .frame(width: 32, alignment: .trailing)
@@ -177,9 +186,12 @@ struct PlayerControlsView: View {
         }
         .background(Color(nsColor: .windowBackgroundColor))
         .onReceive(timer) { _ in
-            if viewModel.playbackState == .playing {
-                currentTime = (currentTime + 0.1).truncatingRemainder(dividingBy: totalDuration)
+            switch viewModel.playbackState {
+            case .playing, .paused, .stopped:
+                currentTime = min(duration, max(0, viewModel.playbackPosition))
                 rotationAngle = (rotationAngle + 4.5).truncatingRemainder(dividingBy: 360)
+            default:
+                currentTime = 0
             }
         }
     }

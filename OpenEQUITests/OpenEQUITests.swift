@@ -1,43 +1,35 @@
-//
-//  OpenEQUITests.swift
-//  OpenEQUITests
-//
-//  Created by Ozan
-//
-
 import XCTest
 
 final class OpenEQUITests: XCTestCase {
-
     override func setUpWithError() throws {
-        // Put setup code here. This method is called before the invocation of each test method in the class.
-
-        // In UI tests it is usually best to stop immediately when a failure occurs.
         continueAfterFailure = false
-
-        // In UI tests it’s important to set the initial state - such as interface orientation - required for your tests before they run. The setUp method is a good place to do this.
-    }
-
-    override func tearDownWithError() throws {
-        // Put teardown code here. This method is called after the invocation of each test method in the class.
     }
 
     @MainActor
-    func testExample() throws {
-        // UI tests must launch the application that they test.
+    func testLaunchShowsMainControls() throws {
         let app = XCUIApplication()
         app.launch()
 
-        // Use XCTAssert and related functions to verify your tests produce the correct results.
-        // XCUIAutomation Documentation
-        // https://developer.apple.com/documentation/xcuiautomation
+        XCTAssertTrue(app.windows["OpenEQ"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.buttons["System Audio"].exists)
+        XCTAssertTrue(app.buttons["folder.badge.plus"].exists)
     }
 
     @MainActor
-    func testLaunchPerformance() throws {
-        // This measures how long it takes to launch your application.
-        measure(metrics: [XCTApplicationLaunchMetric()]) {
-            XCUIApplication().launch()
-        }
+    func testSystemAudioPanelCanBeOpened() throws {
+        let app = XCUIApplication()
+        app.launch()
+
+        let systemAudioButton = app.buttons["System Audio"]
+        XCTAssertTrue(systemAudioButton.waitForExistence(timeout: 8))
+        systemAudioButton.click()
+
+        XCTAssertTrue(app.buttons["Done"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["System Audio"].exists)
+
+        let systemWideMode = app.radioButtons["System-Wide EQ"]
+        XCTAssertTrue(systemWideMode.waitForExistence(timeout: 3))
+        systemWideMode.click()
+        XCTAssertTrue(app.buttons["Start"].waitForExistence(timeout: 3))
     }
 }

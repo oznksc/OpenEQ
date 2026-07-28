@@ -4,7 +4,6 @@ import Accelerate
 
 let kOpenEQSysObj = AudioObjectID(kAudioObjectSystemObject)
 
-@MainActor
 final class SystemAudioEQEngine {
     private(set) var status: SystemAudioStatus = .stopped
     private(set) var latencyEstimate: TimeInterval?
@@ -22,7 +21,11 @@ final class SystemAudioEQEngine {
     private var origOutputID = AudioObjectID(kAudioObjectUnknown)
     private var isRunning = false
     private var sampleRate: Double = 48000
-    private var lastEQPreset: EQPreset?
+    private let dspState = SystemAudioDSPState()
+
+    deinit {
+        stop()
+    }
 
     func start(with preset: EQPreset) {
         guard #available(macOS 14.2, *) else {
@@ -30,10 +33,12 @@ final class SystemAudioEQEngine {
             return
         }
         stop()
-        lastEQPreset = preset
         do {
             origOutputID = try getDefaultOutputDeviceID()
             try setupTap()
+            ioQueue.sync {
+                dspState.configure(preset, sampleRate: sampleRate)
+            }
             try setupAggregateWithOutput()
             try setDefaultOutput(aggDeviceID)
             try startAggIO()
@@ -43,7 +48,7 @@ final class SystemAudioEQEngine {
             onStatusChanged?(.running)
             logger.info("System-wide EQ started on aggregate device")
         } catch {
-            cleanup()
+            cleanup(restoreOutput: true)
             let msg = (error as? SystemAudioEQError)?.localizedDescription ?? error.localizedDescription
             status = .failed(msg)
             onStatusChanged?(status)
@@ -52,13 +57,10 @@ final class SystemAudioEQEngine {
     }
 
     func stop() {
-        guard isRunning else { return }
-        if origOutputID != kAudioObjectUnknown {
-            try? setDefaultOutput(origOutputID)
+        cleanup(restoreOutput: true)
+        ioQueue.sync {
+            dspState.reset()
         }
-        stopAggIO()
-        destroyAggregate()
-        destroyTap()
         isRunning = false
         status = .stopped
         latencyEstimate = nil
@@ -66,10 +68,18 @@ final class SystemAudioEQEngine {
         logger.info("System-wide EQ stopped")
     }
 
-    var isBypassed = false
+    func updateEQ(_ preset: EQPreset) {
+        let rate = sampleRate
+        ioQueue.async { [weak self] in
+            self?.dspState.configure(preset, sampleRate: rate)
+        }
+    }
 
-    func updateEQ(_ preset: EQPreset) { lastEQPreset = preset }
-    func setBypassed(_ bypassed: Bool) { isBypassed = bypassed }
+    func setBypassed(_ bypassed: Bool) {
+        ioQueue.async { [weak self] in
+            self?.dspState.isBypassed = bypassed
+        }
+    }
 
     // MARK: - Setup
 
@@ -133,84 +143,52 @@ final class SystemAudioEQEngine {
             throw SystemAudioEQError.failed("Create IOProc: \(err)")
         }
         aggIOProcID = procID
-        AudioDeviceStart(aggDeviceID, procID)
+        let startStatus = AudioDeviceStart(aggDeviceID, procID)
+        guard startStatus == noErr else {
+            AudioDeviceDestroyIOProcID(aggDeviceID, procID)
+            aggIOProcID = nil
+            throw SystemAudioEQError.failed("Start IOProc: \(startStatus)")
+        }
     }
 
     // MARK: - IO
-
-    private nonisolated(unsafe) static var testPhase: Float = 0
 
     private func handleIO(inData: UnsafePointer<AudioBufferList>, outData: UnsafeMutablePointer<AudioBufferList>, format: AVAudioFormat) {
         let inBuffers = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: inData))
         let outBuffers = UnsafeMutableAudioBufferListPointer(outData)
         let channelCount = Int(format.channelCount)
 
-        if let firstBuf = inBuffers.first, firstBuf.mData != nil, firstBuf.mDataByteSize > 0 {
-            let activeChannels = min(inBuffers.count, outBuffers.count, channelCount)
+        for buffer in outBuffers {
+            guard let data = buffer.mData, buffer.mDataByteSize > 0 else { continue }
+            memset(data, 0, Int(buffer.mDataByteSize))
+        }
 
-            for ch in 0..<activeChannels {
-                guard let inChData = inBuffers[ch].mData,
-                      let outChData = outBuffers[ch].mData else { continue }
-                let copyBytes = min(inBuffers[ch].mDataByteSize, outBuffers[ch].mDataByteSize)
-                let frames = Int(copyBytes) / MemoryLayout<Float>.size
-                guard frames > 0 else { continue }
-                let src = inChData.assumingMemoryBound(to: Float.self)
-                let dest = outChData.assumingMemoryBound(to: Float.self)
-                memcpy(dest, src, Int(copyBytes))
-                if !isBypassed, let preset = lastEQPreset {
-                    applyEQChannel(dest, frames: frames, preset: preset)
-                }
-            }
+        guard let firstInput = inBuffers.first,
+              firstInput.mData != nil,
+              firstInput.mDataByteSize > 0 else {
+            return
+        }
 
-            for ch in activeChannels..<outBuffers.count {
-                guard let data = outBuffers[ch].mData, outBuffers[ch].mDataByteSize > 0 else { continue }
-                memset(data, 0, Int(outBuffers[ch].mDataByteSize))
-            }
+        let activeChannels = min(inBuffers.count, outBuffers.count, channelCount)
+        for channel in 0..<activeChannels {
+            guard let inputData = inBuffers[channel].mData,
+                  let outputData = outBuffers[channel].mData else { continue }
+            let copyBytes = min(inBuffers[channel].mDataByteSize, outBuffers[channel].mDataByteSize)
+            let frames = Int(copyBytes) / MemoryLayout<Float>.size
+            guard frames > 0 else { continue }
 
-            let analysisFrames = inBuffers.first?.mDataByteSize ?? 0 > 0
-                ? Int(inBuffers[0].mDataByteSize) / MemoryLayout<Float>.size : 0
-            if analysisFrames > 0,
-               let analysis = analyzer.analyze(bufferList: inData, frameLength: analysisFrames, sampleRate: sampleRate) {
-                DispatchQueue.main.async { [weak self] in self?.onAnalysis?(analysis) }
-            }
-        } else {
-            for ch in 0..<min(outBuffers.count, channelCount) {
-                guard let data = outBuffers[ch].mData, outBuffers[ch].mDataByteSize > 0 else { continue }
-                let frames = Int(outBuffers[ch].mDataByteSize) / MemoryLayout<Float>.size
-                let ptr = data.assumingMemoryBound(to: Float.self)
-                for i in 0..<frames {
-                    ptr[i] = sin(Self.testPhase) * 0.02
-                    Self.testPhase += 2 * Float.pi * 440 / Float(sampleRate)
-                    if Self.testPhase > 2 * Float.pi { Self.testPhase -= 2 * Float.pi }
-                }
-            }
+            let source = inputData.assumingMemoryBound(to: Float.self)
+            let destination = outputData.assumingMemoryBound(to: Float.self)
+            memcpy(destination, source, Int(copyBytes))
+            dspState.process(destination, frames: frames, channel: channel)
+        }
+
+        let analysisFrames = Int(firstInput.mDataByteSize) / MemoryLayout<Float>.size
+        if analysisFrames > 0,
+           let analysis = analyzer.analyze(bufferList: inData, frameLength: analysisFrames, sampleRate: sampleRate) {
+            DispatchQueue.main.async { [weak self] in self?.onAnalysis?(analysis) }
         }
     }
-
-    // MARK: - EQ
-
-    private func applyEQChannel(_ s: UnsafeMutablePointer<Float>, frames: Int, preset: EQPreset) {
-        let gGain = dbToLinear(preset.preamp)
-        let gains: [Float] = preset.bands.map { dbToLinear($0.gain) }
-        let sr = Float(sampleRate)
-        let bc = min(gains.count, 31)
-        if abs(gGain - 1.0) > 0.01 { var g = gGain; vDSP_vsmul(s, 1, &g, s, 1, vDSP_Length(frames)) }
-        for b in 0..<bc {
-            let gl = gains[b]
-            guard abs(gl - 1.0) > 0.01 else { continue }
-            let w0 = 2 * Float.pi * kOpenEQBands[b] / sr
-            guard w0 < Float.pi else { continue }
-            let Q: Float = 1.414; let a = sin(w0) / (2 * Q); let A = sqrt(gl)
-            let (b0,b1,b2,a0,a1,a2): (Float,Float,Float,Float,Float,Float)
-            if gl >= 1.0 { b0=1+a*A; b1 = -2*cos(w0); b2=1-a*A; a0=1+a/A; a1 = -2*cos(w0); a2=1-a/A }
-            else { b0=1+a/A; b1 = -2*cos(w0); b2=1-a/A; a0=1+a*A; a1 = -2*cos(w0); a2=1-a/A }
-            let ai=1/a0; let f0=b0*ai,f1=b1*ai,f2=b2*ai; let g0=a1*ai,g1=a2*ai
-            var x1:Float=0,x2:Float=0,y1:Float=0,y2:Float=0
-            for i in 0..<frames { let x0=s[i]; let y0=f0*x0+f1*x1+f2*x2-g0*y1-g1*y2; s[i]=y0; x2=x1;x1=x0;y2=y1;y1=y0 }
-        }
-    }
-
-    private func dbToLinear(_ d: Float) -> Float { pow(10, d / 20) }
 
     // MARK: - Helpers
 
@@ -274,7 +252,15 @@ final class SystemAudioEQEngine {
         if tapID != kAudioObjectUnknown { AudioHardwareDestroyProcessTap(tapID); tapID = kAudioObjectUnknown }
     }
 
-    private func cleanup() { stopAggIO(); destroyAggregate(); destroyTap() }
+    private func cleanup(restoreOutput: Bool = false) {
+        if restoreOutput, origOutputID != kAudioObjectUnknown {
+            try? setDefaultOutput(origOutputID)
+        }
+        stopAggIO()
+        destroyAggregate()
+        destroyTap()
+        origOutputID = kAudioObjectUnknown
+    }
 }
 
 enum SystemAudioEQError: LocalizedError {
@@ -284,4 +270,181 @@ enum SystemAudioEQError: LocalizedError {
     }
 }
 
-private let kOpenEQBands: [Float] = [20,25,31.5,40,50,63,80,100,125,160,200,250,315,400,500,630,800,1000,1250,1600,2000,2500,3150,4000,5000,6300,8000,10000,12500,16000,20000]
+private struct BiquadCoefficients {
+    let b0: Float
+    let b1: Float
+    let b2: Float
+    let a1: Float
+    let a2: Float
+
+    static let identity = BiquadCoefficients(b0: 1, b1: 0, b2: 0, a1: 0, a2: 0)
+
+    static func normalized(
+        b0: Float,
+        b1: Float,
+        b2: Float,
+        a0: Float,
+        a1: Float,
+        a2: Float
+    ) -> BiquadCoefficients {
+        let inverseA0 = 1 / a0
+        return BiquadCoefficients(
+            b0: b0 * inverseA0,
+            b1: b1 * inverseA0,
+            b2: b2 * inverseA0,
+            a1: a1 * inverseA0,
+            a2: a2 * inverseA0
+        )
+    }
+}
+
+private struct BiquadState {
+    var x1: Float = 0
+    var x2: Float = 0
+    var y1: Float = 0
+    var y2: Float = 0
+}
+
+private final class SystemAudioDSPState {
+    private(set) var coefficients = Array(repeating: BiquadCoefficients.identity, count: 31)
+    private var leftStates = Array(repeating: BiquadState(), count: 31)
+    private var rightStates = Array(repeating: BiquadState(), count: 31)
+    private var preampLinear: Float = 1
+    var isBypassed = false
+
+    func configure(_ preset: EQPreset, sampleRate: Double) {
+        preampLinear = pow(10, preset.preamp / 20)
+
+        for index in coefficients.indices {
+            guard index < preset.bands.count else {
+                coefficients[index] = .identity
+                continue
+            }
+
+            coefficients[index] = Self.makeCoefficients(
+                for: preset.bands[index],
+                sampleRate: Float(sampleRate)
+            )
+        }
+    }
+
+    func reset() {
+        preampLinear = 1
+        coefficients = Array(repeating: .identity, count: 31)
+        leftStates = Array(repeating: BiquadState(), count: 31)
+        rightStates = Array(repeating: BiquadState(), count: 31)
+    }
+
+    func process(_ samples: UnsafeMutablePointer<Float>, frames: Int, channel: Int) {
+        guard !isBypassed else { return }
+
+        if abs(preampLinear - 1) > 0.0001 {
+            var gain = preampLinear
+            vDSP_vsmul(samples, 1, &gain, samples, 1, vDSP_Length(frames))
+        }
+
+        if channel == 0 {
+            processFilters(samples, frames: frames, states: &leftStates)
+        } else {
+            processFilters(samples, frames: frames, states: &rightStates)
+        }
+    }
+
+    private func processFilters(
+        _ samples: UnsafeMutablePointer<Float>,
+        frames: Int,
+        states: inout [BiquadState]
+    ) {
+        for band in coefficients.indices {
+            let coefficient = coefficients[band]
+            if coefficient.b0 == 1,
+               coefficient.b1 == 0,
+               coefficient.b2 == 0,
+               coefficient.a1 == 0,
+               coefficient.a2 == 0 {
+                continue
+            }
+
+            var state = states[band]
+            for index in 0..<frames {
+                let input = samples[index]
+                let output = coefficient.b0 * input
+                    + coefficient.b1 * state.x1
+                    + coefficient.b2 * state.x2
+                    - coefficient.a1 * state.y1
+                    - coefficient.a2 * state.y2
+                samples[index] = output
+                state.x2 = state.x1
+                state.x1 = input
+                state.y2 = state.y1
+                state.y1 = output
+            }
+            states[band] = state
+        }
+    }
+
+    private static func makeCoefficients(for band: EQBand, sampleRate: Float) -> BiquadCoefficients {
+        guard band.isEnabled, sampleRate > 0 else { return .identity }
+
+        let frequency = max(20, min(band.frequency, sampleRate * 0.49))
+        let omega = 2 * Float.pi * frequency / sampleRate
+        let sine = sin(omega)
+        let cosine = cos(omega)
+        let q = max(0.1, min(10, band.q))
+        let amplitude = pow(10, band.gain / 40)
+        let alpha = sine / (2 * q)
+
+        switch band.filterType {
+        case .parametric:
+            return .normalized(
+                b0: 1 + alpha * amplitude,
+                b1: -2 * cosine,
+                b2: 1 - alpha * amplitude,
+                a0: 1 + alpha / amplitude,
+                a1: -2 * cosine,
+                a2: 1 - alpha / amplitude
+            )
+        case .lowShelf, .highShelf:
+            let shelfAlpha = sine / 2 * sqrt(max(0, (amplitude + 1 / amplitude) * (1 / q - 1) + 2))
+            let beta = 2 * sqrt(amplitude) * shelfAlpha
+
+            if band.filterType == .lowShelf {
+                return .normalized(
+                    b0: amplitude * ((amplitude + 1) - (amplitude - 1) * cosine + beta),
+                    b1: 2 * amplitude * ((amplitude - 1) - (amplitude + 1) * cosine),
+                    b2: amplitude * ((amplitude + 1) - (amplitude - 1) * cosine - beta),
+                    a0: (amplitude + 1) + (amplitude - 1) * cosine + beta,
+                    a1: -2 * ((amplitude - 1) + (amplitude + 1) * cosine),
+                    a2: (amplitude + 1) + (amplitude - 1) * cosine - beta
+                )
+            }
+
+            return .normalized(
+                b0: amplitude * ((amplitude + 1) + (amplitude - 1) * cosine + beta),
+                b1: -2 * amplitude * ((amplitude - 1) + (amplitude + 1) * cosine),
+                b2: amplitude * ((amplitude + 1) + (amplitude - 1) * cosine - beta),
+                a0: (amplitude + 1) - (amplitude - 1) * cosine + beta,
+                a1: 2 * ((amplitude - 1) - (amplitude + 1) * cosine),
+                a2: (amplitude + 1) - (amplitude - 1) * cosine - beta
+            )
+        case .lowPass:
+            return .normalized(
+                b0: (1 - cosine) / 2,
+                b1: 1 - cosine,
+                b2: (1 - cosine) / 2,
+                a0: 1 + alpha,
+                a1: -2 * cosine,
+                a2: 1 - alpha
+            )
+        case .highPass:
+            return .normalized(
+                b0: (1 + cosine) / 2,
+                b1: -(1 + cosine),
+                b2: (1 + cosine) / 2,
+                a0: 1 + alpha,
+                a1: -2 * cosine,
+                a2: 1 - alpha
+            )
+        }
+    }
+}
