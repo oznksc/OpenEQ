@@ -2,31 +2,36 @@
 
 ## Project Overview
 
-OpenEQ is a macOS audio equalizer that processes both local files and system-wide audio. It uses two separate audio pipelines:
+OpenEQ is a macOS audio equalizer.
 
-- **Local playback**: `AVAudioEngine` + `AVAudioPlayerNode` + `AVAudioUnitEQ`
-- **System-wide EQ**: Core Audio process tap (`CATapDescription`) + aggregate device + manual biquad DSP via vDSP
+- **Local playback (production):** `AVAudioEngine` + `AVAudioPlayerNode` + `AVAudioUnitEQ` + peak limiter
+- **System-wide EQ (experimental):** Core Audio process tap (`CATapDescription`) + aggregate device + manual biquad DSP + peak limiter
+- **External loopback (advanced):** BlackHole-style virtual input via `AVAudioEngine`
+
+**Do not oversell system-wide EQ** in UI copy or README. Local EQ is the stable core.
 
 ## Architecture
 
 MVVM with `@Observable`:
-- `OpenEQViewModel` — single source of truth for UI state
-- `SystemAudioManager` — orchestrates system audio modes
-- `AudioEngineController` — local file playback engine
-- `SystemAudioEQEngine` — Core Audio tap + manual biquad EQ
-- `ExternalLoopbackEngine` — BlackHole-based loopback via AVAudioEngine
+- `OpenEQViewModel` — single source of truth; unified EQ/bypass policy for all engines
+- `SystemAudioManager` — system modes, device snapshot, safe mode
+- `AudioEngineController` — local file playback
+- `SystemAudioEQEngine` — tap + aggregate + biquad DSP (track **physical** output, never rebuild using our own aggregate as destination)
+- `ExternalLoopbackEngine` — BlackHole loopback
+- `PeakLimiterConfigurator` — shared Apple peak-limiter defaults
 
 ## Audio Formats
 
 - Core Audio process taps provide **non-interleaved** Float32 audio (separate AudioBuffer per channel)
 - Local playback uses AVAudioEngine's default interleaved format
 - `handleIO` in `SystemAudioEQEngine` must copy per-channel (not from `.first` buffer)
+- Keep the peak limiter engaged when EQ is bypassed
 
 ## Build & Test
 
 ```bash
 # Build
-xcodebuild -project OpenEQ.xcodeproj -scheme OpenEQ build
+xcodebuild -project OpenEQ.xcodeproj -scheme OpenEQ -destination 'platform=macOS' build
 
 # Test
 xcodebuild test -project OpenEQ.xcodeproj -scheme OpenEQ -destination 'platform=macOS'
@@ -42,7 +47,8 @@ open OpenEQ.xcodeproj  # then press Cmd+R
 - One type per file, grouped by layer
 - No allocations/locks in audio callbacks
 - Use `@Observable` for all view models
+- Keep docs (`README`, `docs/*`) aligned with real behavior (Phase 0 rule)
 
 ## System Audio Permissions
 
-System-wide EQ requires macOS 14.2+ and Screen/System Audio Recording permission. First tap creation triggers system prompt.
+System-wide EQ requires macOS 14.2+ and Screen & System Audio Recording permission. First tap creation triggers the system prompt. On failure, surface permission recovery (System Settings link) and safe mode restore of the original default output.

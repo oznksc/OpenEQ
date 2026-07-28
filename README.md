@@ -4,72 +4,85 @@
 
 # OpenEQ
 
-An open-source macOS audio equalizer application built with **SwiftUI**, **AVFoundation**, and **Accelerate (vDSP)**. OpenEQ provides a lightweight, performant desktop dashboard designed for audio adjustments, custom graphic equalization curves, and real-time audio analysis.
+An open-source macOS audio equalizer built with **SwiftUI**, **AVFoundation**, **Core Audio**, and **Accelerate (vDSP)**.
 
-## Features
+OpenEQ is a lightweight desktop EQ for:
 
-### Equalizer
-- **10-Band & 31-Band Graphic Equalizer**: Switchable between standard 10-band and professional 31-band ISO frequency intervals.
-- **5-Band Parametric EQ**: Configurable frequency, gain, Q factor, and filter types (parametric, low/high shelf, low/high pass).
-- **Independent Preamp Control**: Fine-tune volume levels with standard decibel mapping limits (`-24.0` to `+24.0` dB).
-- **EQ Bypass**: Instant toggle to compare processed vs unprocessed audio.
-- **Real-Time FFT Spectrum Analyzer**: 64-band spectrum visualization using GPU-accelerated Canvas rendering and vDSP Fourier Transform.
+1. **Local files** (production-ready) — open a track, shape it, A/B with bypass  
+2. **System-wide audio** (experimental) — process other apps after granting Screen & System Audio Recording permission  
 
-### Audio Playback
-- Local audio file playback (MP3, WAV, AAC, CAF, AIFF) with EQ applied.
-- Playback controls: play, pause, stop, seek, volume, mute.
-- **Volume Booster**: Boost volume up to 200% beyond system limits.
+## What works today (V1)
 
-### Presets
-- 5 built-in presets: Flat, Bass Boost, Vocal Clarity, Warm, Bright.
-- Save/delete custom user presets.
-- Import/export presets as JSON files.
+### Local equalizer (stable)
+- **10-band & 31-band** graphic EQ (ISO frequencies)
+- **5-band parametric EQ** (frequency, gain, Q, filter type)
+- Preamp (`-24` … `+24` dB), EQ bypass, volume boost up to 200%
+- Peak limiter on the output path (headroom safety)
+- Real-time **64-band FFT spectrum** (Canvas + vDSP)
+- Built-in presets + custom save/import/export (JSON)
+- Menu bar: bypass, volume, recent presets, playback controls
 
-### System Audio (Beta)
-- **Monitor Only**: Inspect system audio without processing.
-- **External Loopback**: Route system audio through EQ using a virtual audio device (e.g., BlackHole).
-- Real-time spectrum analysis of system audio.
+### System audio (experimental)
+Requires **macOS 14.2+** and **Screen & System Audio Recording** permission.
 
-### Menu Bar Integration
-- Quick EQ toggle from the menu bar.
-- Preset switching and playback controls without opening the main window.
+| Mode | What it does | Notes |
+|------|----------------|-------|
+| **System-Wide EQ** | Core Audio process tap → biquad EQ + limiter → private aggregate device | No BlackHole install; still edge-case sensitive (device hops, permission) |
+| **External Loopback** | Process a virtual input (e.g. BlackHole) through OpenEQ | Explicit routing; advanced users |
+| **Disabled** | Local files only | Default |
 
-### Keyboard Shortcuts
+**Not claimed yet:** zero-latency virtual driver, install-free perfect system routing on every hardware setup, or multi-channel Atmos calibration.
+
+Safety nets: unified bypass, emergency stop / safe mode (restores default output), latency readout, permission recovery to System Settings.
+
+Details: [docs/system-audio.md](docs/system-audio.md).
+
+### Keyboard shortcuts
+
 | Shortcut | Action |
 |----------|--------|
-| `⌘O` | Open Audio File |
+| `⌘O` | Open audio file |
 | `⌘R` | Reset EQ |
-| `⌘B` | Toggle EQ Bypass |
-| `⌘⇧V` | Toggle Volume Boost |
-| `Space` | Play/Pause |
+| `⌘B` | Toggle EQ bypass |
+| `⌘⇧V` | Toggle volume boost |
+| `Space` | Play / pause |
 
-## Architecture Overview
-OpenEQ is structured around clean, modular boundaries:
-1. **SwiftUI Layer**: Responsive user interface including custom faders and GPU-buffered spectrum canvas drawing.
-2. **ViewModel Layer (MVVM)**: Observes playback states and manages UI interactions, data bindings, and user preferences persistence.
-3. **AudioCore Layer**: Interfaces with Apple's `AVAudioEngine`, establishing node graphs, parametric filters, volume multipliers, and output taps.
-4. **vDSP Spectrum Analyzer**: Executes windowing and Forward Discrete Fourier Transforms on captured buffer frames.
-5. **Services**: PresetStore (JSON-based preset persistence).
+## Architecture
 
-For detailed design specifications, see [docs/architecture.md](docs/architecture.md).
+```
+SwiftUI Views → OpenEQViewModel → AudioEngineController   (local files)
+                               → SystemAudioManager
+                                    ├─ SystemAudioEQEngine      (process tap + aggregate)
+                                    └─ ExternalLoopbackEngine   (BlackHole path)
+```
 
-## Build Instructions
-### Prerequisites
-- macOS 14.0 or newer
-- Xcode 15.0 or newer (or command line build utilities)
+- Local path: `AVAudioEngine` + `AVAudioPlayerNode` + `AVAudioUnitEQ` + peak limiter  
+- System path: `CATapDescription` + aggregate device + manual biquad DSP + peak limiter  
+- Spectrum: vDSP FFT, Hanning window, decay smoothing  
 
-### Building via Xcode
-1. Open the directory project file: `OpenEQ.xcodeproj` in Xcode.
-2. Select target scheme **OpenEQ** and set build destination to **My Mac**.
-3. Press `Cmd + B` to build or `Cmd + R` to run.
+See [docs/architecture.md](docs/architecture.md), [docs/ROADMAP.md](docs/ROADMAP.md).
 
-### Building via Terminal
+## Requirements
+
+- macOS **14.0+** (local EQ)
+- macOS **14.2+** (system-wide EQ)
+- Xcode 15+ (or matching command-line tools)
+
+## Build
+
 ```bash
-xcodebuild -scheme OpenEQ -destination 'platform=macOS' build
+# Xcode
+open OpenEQ.xcodeproj   # scheme OpenEQ → My Mac → ⌘R
+
+# CLI
+xcodebuild -project OpenEQ.xcodeproj -scheme OpenEQ -destination 'platform=macOS' build
+xcodebuild test -project OpenEQ.xcodeproj -scheme OpenEQ -destination 'platform=macOS'
 ```
 
 ## Contributing
-We welcome contributions! Please review our [CONTRIBUTING.md](CONTRIBUTING.md) guide to learn about coding guidelines, git workflows, and pull request procedures.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) and [AGENTS.md](AGENTS.md) for agent/contributor conventions.
 
 ## License
-OpenEQ is open-source and licensed under the permissive **MIT License**. See the [LICENSE](LICENSE) file for complete details.
+
+MIT — see [LICENSE](LICENSE).

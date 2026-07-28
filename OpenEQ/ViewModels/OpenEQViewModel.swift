@@ -74,7 +74,11 @@ final class OpenEQViewModel {
             return "External Loopback EQ"
         }
 
-        return isSystemAudioMonitorActive ? "System Audio Monitor" : "Real-Time FFT Spectrum"
+        if isSystemEQActive {
+            return "System-Wide EQ"
+        }
+
+        return "Real-Time FFT Spectrum"
     }
 
     var spectrumWarning: String? {
@@ -82,13 +86,23 @@ final class OpenEQViewModel {
             return "External loopback applies EQ to a user-installed virtual input and plays it to your selected output."
         }
 
-        return isSystemAudioMonitorActive
-        ? "Monitor mode analyzes system audio only. It does not apply EQ to system output."
-        : nil
+        if isSystemEQActive {
+            if let latency = systemAudioLatency {
+                return String(format: "Processing all system audio · ~%.0f ms latency", latency * 1000)
+            }
+            return "Processing all system audio through OpenEQ."
+        }
+
+        return nil
     }
 
-    var isSystemAudioMonitorActive: Bool {
+    var isSystemEQActive: Bool {
         systemAudioMode == .systemEQ && systemAudioStatus == .running
+    }
+
+    /// Legacy alias used by older call sites / previews.
+    var isSystemAudioMonitorActive: Bool {
+        isSystemEQActive
     }
 
     var isExternalLoopbackActive: Bool {
@@ -117,7 +131,10 @@ final class OpenEQViewModel {
     var detectedBlackHoleDevice: AudioDevice?
     var externalLoopbackLatency: TimeInterval?
     var isExternalLoopbackBypassed: Bool
+    var isSystemAudioBypassed: Bool
     var systemAudioLatency: TimeInterval?
+    /// Most recently used presets for menu-bar quick switching (newest first).
+    var recentPresets: [EQPreset] = []
 
     var playbackDuration: TimeInterval {
         audioEngineController.playbackDuration
@@ -169,7 +186,9 @@ final class OpenEQViewModel {
         self.detectedBlackHoleDevice = systemAudioManager.detectedBlackHoleDevice
         self.externalLoopbackLatency = systemAudioManager.externalLoopbackLatency
         self.isExternalLoopbackBypassed = systemAudioManager.isExternalLoopbackBypassed
+        self.isSystemAudioBypassed = systemAudioManager.isSystemAudioBypassed
         self.systemAudioLatency = systemAudioManager.systemAudioLatency
+        self.recentPresets = [initialPreset]
 
         self.audioEngineController.currentGraphicBandCount = .ten
         self.audioEngineController.applyPreset(initialPreset)
@@ -278,8 +297,16 @@ final class OpenEQViewModel {
 
     func startSystemEQMode() {
         stop()
-        systemAudioManager.startSystemEQ()
+        systemAudioManager.setSystemAudioBypassed(!isEnabled)
+        systemAudioManager.startSystemEQ(preset: currentActivePreset())
         syncSystemAudioState()
+        if case .failed(let message) = systemAudioStatus {
+            errorMessage = message
+        } else if systemAudioStatus == .permissionRequired {
+            errorMessage = "Grant Screen & System Audio Recording permission, then try again."
+        } else {
+            errorMessage = nil
+        }
     }
 
     func stopSystemEQMode() {
@@ -289,8 +316,14 @@ final class OpenEQViewModel {
 
     func startExternalLoopbackMode() {
         stop()
-        systemAudioManager.startExternalLoopback(preset: currentLoopbackPreset())
+        systemAudioManager.setExternalLoopbackBypassed(!isEnabled)
+        systemAudioManager.startExternalLoopback(preset: currentActivePreset())
         syncSystemAudioState()
+        if case .failed(let message) = systemAudioStatus {
+            errorMessage = message
+        } else {
+            errorMessage = nil
+        }
     }
 
     func stopExternalLoopbackMode() {
@@ -304,8 +337,21 @@ final class OpenEQViewModel {
         syncSystemAudioState()
     }
 
+    /// Immediate passthrough: stop all system processing and restore device routing.
+    func enterSafeMode() {
+        systemAudioManager.enterSafeMode()
+        isEnabled = true
+        audioEngineController.setBypass(false)
+        syncSystemAudioState()
+        errorMessage = nil
+    }
+
+    func openSystemAudioPrivacySettings() {
+        systemAudioManager.openSystemAudioPrivacySettings()
+    }
+
     func restartExternalLoopbackMode() {
-        systemAudioManager.restartExternalLoopback(preset: currentLoopbackPreset())
+        systemAudioManager.restartExternalLoopback(preset: currentActivePreset())
         syncSystemAudioState()
     }
 
@@ -404,9 +450,11 @@ final class OpenEQViewModel {
 
     func setEnabled(_ enabled: Bool) {
         isEnabled = enabled
+        // Unified bypass policy across local, system EQ, and external loopback.
         audioEngineController.setBypass(!enabled)
-        updateExternalLoopbackEQIfNeeded()
-        updateSystemEQIfNeeded()
+        systemAudioManager.setSystemAudioBypassed(!enabled)
+        systemAudioManager.setExternalLoopbackBypassed(!enabled)
+        syncSystemAudioState()
     }
 
     func setGraphicBandCount(_ count: GraphicBandCount) {
@@ -510,6 +558,7 @@ final class OpenEQViewModel {
         cacheActiveBands()
         preamp = preset.preamp
         audioEngineController.applyPreset(preset)
+        rememberRecentPreset(preset)
         updateExternalLoopbackEQIfNeeded()
         updateSystemEQIfNeeded()
     }
@@ -601,6 +650,7 @@ final class OpenEQViewModel {
         detectedBlackHoleDevice = systemAudioManager.detectedBlackHoleDevice
         externalLoopbackLatency = systemAudioManager.externalLoopbackLatency
         isExternalLoopbackBypassed = systemAudioManager.isExternalLoopbackBypassed
+        isSystemAudioBypassed = systemAudioManager.isSystemAudioBypassed
         systemAudioLatency = systemAudioManager.systemAudioLatency
     }
 
@@ -609,7 +659,7 @@ final class OpenEQViewModel {
             return
         }
 
-        systemAudioManager.updateExternalLoopbackEQ(currentLoopbackPreset())
+        systemAudioManager.updateExternalLoopbackEQ(currentActivePreset())
         syncSystemAudioState()
     }
 
@@ -618,17 +668,29 @@ final class OpenEQViewModel {
             return
         }
 
-        systemAudioManager.updateSystemAudioEQ(currentLoopbackPreset())
+        systemAudioManager.updateSystemAudioEQ(currentActivePreset())
         syncSystemAudioState()
     }
 
-    private func currentLoopbackPreset() -> EQPreset {
+    /// Single DSP policy for every engine: same bands, mode, and preamp.
+    private func currentActivePreset() -> EQPreset {
         EQPreset(
             name: selectedPreset.name,
             mode: eqMode,
             bands: bands,
-            preamp: min(preamp, 0.0)
+            preamp: preamp
         )
+    }
+
+    private func rememberRecentPreset(_ preset: EQPreset) {
+        // Skip ephemeral "Custom" fader edits for the quick-switch list.
+        guard preset.name != "Custom" else { return }
+
+        recentPresets.removeAll { $0.id == preset.id || $0.name == preset.name }
+        recentPresets.insert(preset, at: 0)
+        if recentPresets.count > 3 {
+            recentPresets = Array(recentPresets.prefix(3))
+        }
     }
 }
 

@@ -1,48 +1,75 @@
 # OpenEQ Architecture Specifications
 
-This document outlines the architectural boundaries and data flows of **OpenEQ**, a modular macOS audio equalizer application.
+Modular macOS audio equalizer: local file playback and experimental system-wide processing.
 
 ```mermaid
 graph TD
     A[SwiftUI Views] -->|Binds & Triggers| B[OpenEQViewModel]
     B -->|Exposes Observed State| A
-    B -->|Playback & Parameter Actions| C[AudioEngineController]
-    C -->|Simulates or Taps Audio Buffers| D[SpectrumAnalyzer]
-    D -->|FFT Binned Data| C
-    C -->|Streams Spectrum Levels| B
-    B -->|Preset Loads & Saves| E[PresetStore]
-    E -->|Reads & Writes JSON| F[Application Support JSON file]
+    B -->|Playback & EQ| C[AudioEngineController]
+    B -->|System modes| S[SystemAudioManager]
+    S --> T[SystemAudioEQEngine]
+    S --> L[ExternalLoopbackEngine]
+    C -->|Tap| D[SpectrumAnalyzer]
+    T -->|Post-EQ analysis| D
+    L -->|Tap| D
+    D -->|FFT / peaks| B
+    B -->|Presets| E[PresetStore]
+    E -->|JSON| F[Application Support]
 ```
 
-## 1. SwiftUI UI Layer
-- **MainWindowView**: Combines the application header, the spectrum display, the fader sliders, and the sidebar panel.
-- **SpectrumView**: High-performance canvas-based visualization rendering 64 binned magnitudes at 60 FPS.
-- **EqualizerView**: Contains fader components for preamp and individual bands.
-- **PlayerControlsView**: Displays playback state, time scrubbers, volume controls, and file picker.
-- **PresetPanelView**: Renders built-in/user lists and preset save/import options.
+## 1. SwiftUI UI layer
 
-## 2. ViewModel Layer
-- **OpenEQViewModel**: Exposes `@Observable` properties to SwiftUI.
-  - Serves as the single source of truth for UI configurations, active file paths, volumes, and custom presets.
-  - Controls flow validation (e.g. preventing built-in preset deletion, checking empty selections).
-  - Routes actions asynchronously to the audio engine controller.
+- **MainWindowView** — header, spectrum, equalizer, sidebar presets, player controls  
+- **SpectrumView** — Canvas spectrum + level meters + clipping indicator  
+- **EqualizerView / ParametricEQView** — graphic or parametric controls  
+- **SystemAudioView** — mode picker, start/stop, permission recovery, emergency stop  
+- **MenuBarView** — bypass, volume, recent presets, system status  
 
-## 3. AudioCore Engine
-- **AudioEngineController**: Owns the native AVFoundation graph.
-  - Instantiates `AVAudioEngine`, `AVAudioPlayerNode`, and `AVAudioUnitEQ`.
-  - Reconnects nodes dynamically on file load to prevent sample rate mismatches.
-  - Handles logarithmic decibel preamp mapping: `volume = pow(10.0, db / 20.0)`.
-  - Installs an audio tap on `mainMixerNode` to extract audio samples.
+## 2. ViewModel layer
 
-## 4. Signal Processing (FFT Analysis)
-- **SpectrumAnalyzer**: Handles Discrete Fourier Transforms via Accelerate vDSP.
-  - Captures 1024 float samples.
-  - Applies a Hanning window (`vDSP_hann_window`) to minimize spectral leakage.
-  - Performs forward FFT on split complex representation via `vDSP_fft_zrip`.
-  - Computes power magnitudes (`vDSP_zvmags`), converts values to decibels, normalizes values from `[-60dB, -5dB]` to `[0.0, 1.0]`, and applies decay smoothing filter.
+- **OpenEQViewModel** (`@Observable`) — single UI source of truth  
+  - Local playback actions → `AudioEngineController`  
+  - System modes → `SystemAudioManager`  
+  - **Unified EQ policy**: same bands/preamp/bypass for every engine  
+  - Preset load/save via `PresetStore`  
+  - Safe mode / shutdown restore system routing  
 
-## 5. PresetStore Serialization
-- **PresetStore**: Manages settings storage.
-  - Resolves path to standard local storage: `~/Library/Application Support/OpenEQ/presets.json`.
-  - Encodes/decodes lists of custom configurations as pretty-printed JSON arrays.
-  - Handles NSSavePanel/NSOpenPanel export-import operations securely, renewing unique identifiers to prevent ID collisions.
+## 3. AudioCore — local path
+
+- **AudioEngineController**
+  - Graph: `AVAudioPlayerNode` → `AVAudioUnitEQ` → peak limiter → `mainMixerNode`  
+  - Reconnects on sample-rate / channel-count change  
+  - Preamp via linear gain on player volume (`pow(10, dB/20)`)  
+  - Limiter stays engaged when EQ is bypassed  
+
+## 4. AudioCore — system path
+
+- **SystemAudioManager** — mode orchestration, device snapshot, debounced rebuilds  
+- **SystemAudioEQEngine** (macOS 14.2+)
+  - `CATapDescription` process tap + private aggregate device  
+  - Tracks **physical** output separately from the aggregate (critical for rebuild safety)  
+  - Manual biquad DSP with coefficient smoothing + peak limiter  
+  - Restores original default output on stop / failure / app quit  
+- **ExternalLoopbackEngine**
+  - `AVAudioEngine` input → EQ → limiter → mixer  
+  - Expects user-managed virtual device (e.g. BlackHole)  
+
+See [system-audio.md](system-audio.md).
+
+## 5. Spectrum analysis
+
+- **SpectrumAnalyzer** (Accelerate vDSP)
+  - 1024-sample FFT, Hanning window, power → dB → normalized bars  
+  - Peak / clip metadata for meters  
+
+## 6. Presets
+
+- **PresetStore** — `~/Library/Application Support/OpenEQ/presets.json`  
+- Built-in presets + user presets; import/export renews IDs on import  
+
+## 7. Permissions & privacy
+
+- System EQ: Screen & System Audio Recording  
+- Info.plist usage strings for audio capture / microphone (loopback)  
+- All processing is local; no cloud audio upload  

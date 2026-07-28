@@ -90,15 +90,7 @@ final class AudioEngineController {
     }
 
     private func configureLimiter() {
-        guard let paramTree = limiter.auAudioUnit.parameterTree else { return }
-        paramTree.allParameters.forEach { param in
-            switch param.identifier {
-            case "attackTime": param.value = 0.005
-            case "releaseTime": param.value = 0.05
-            case "preGain": param.value = 0.0
-            default: break
-            }
-        }
+        PeakLimiterConfigurator.applyDefaults(to: limiter)
     }
 
     private func attachNodesIfNeeded() {
@@ -179,9 +171,14 @@ final class AudioEngineController {
         } ?? false
 
         if isFormatChange {
-            logger.info("Format change: \(lastProcessingFormat!.sampleRate)ch/\(lastProcessingFormat!.channelCount) -> \(newFormat.sampleRate)ch/\(newFormat.channelCount)")
+            logger.info(
+                "Format change: \(lastProcessingFormat!.sampleRate)/\(lastProcessingFormat!.channelCount)ch -> \(newFormat.sampleRate)/\(newFormat.channelCount)ch"
+            )
+            removeTap()
+            player.stop()
             engine.stop()
             engine.reset()
+            isGraphConnected = false
         }
 
         do {
@@ -191,12 +188,14 @@ final class AudioEngineController {
             throw error
         }
 
-        if isFormatChange {
-            do {
-                try engine.start()
-            } catch {
-                logger.error("Engine restart after format change failed: \(error.localizedDescription)")
-            }
+        // Always ensure the engine is running after a successful prepare so
+        // play()/seek() never race a half-rebuilt graph after sample-rate switches.
+        do {
+            try startEngineIfNeeded()
+        } catch {
+            logger.error("Engine start after prepare failed: \(error.localizedDescription)")
+            fail(error)
+            throw error
         }
 
         lastProcessingFormat = newFormat
@@ -438,8 +437,10 @@ final class AudioEngineController {
     }
 
     func setBypass(_ bypass: Bool) {
+        // Keep the peak limiter engaged even when EQ is bypassed so volume
+        // boost and preamp cannot hard-clip the output path.
         eq.bypass = bypass
-        limiter.bypass = bypass
+        limiter.bypass = false
     }
 
     func setVolumeBoost(_ multiplier: Double) {

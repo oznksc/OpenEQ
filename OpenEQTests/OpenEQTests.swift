@@ -327,4 +327,86 @@ final class OpenEQTests: XCTestCase {
         XCTAssertEqual(EQFilterType.lowPass.title, "Low Pass")
         XCTAssertEqual(EQFilterType.highPass.title, "High Pass")
     }
+
+    // MARK: - Phase 1 Stability
+
+    func testDecibelToLinearConversion() {
+        let cases: [(Float, Float)] = [
+            (0.0, 1.0),
+            (6.0206, 2.0),
+            (-6.0206, 0.5),
+            (-24.0, 0.0630957)
+        ]
+
+        for (db, expected) in cases {
+            let linear = pow(10.0, db / 20.0)
+            XCTAssertEqual(linear, expected, accuracy: 1e-4, "Failed for \(db) dB")
+        }
+    }
+
+    func testAudioEngineBypassKeepsEnginePlayable() throws {
+        let controller = AudioEngineController()
+        let url = URL(fileURLWithPath: "/System/Library/Sounds/Ping.aiff")
+
+        try controller.prepare(url: url)
+        controller.setBypass(true)
+        controller.play()
+
+        if case .failed(let message) = controller.playbackState {
+            XCTFail("Bypassed playback failed: \(message)")
+        } else {
+            XCTAssertEqual(controller.playbackState, .playing)
+        }
+
+        controller.setBypass(false)
+        controller.stop()
+        XCTAssertEqual(controller.playbackState, .stopped)
+    }
+
+    func testAudioEngineSurvivesSampleRateStyleReload() throws {
+        let controller = AudioEngineController()
+        let first = URL(fileURLWithPath: "/System/Library/Sounds/Ping.aiff")
+        let second = URL(fileURLWithPath: "/System/Library/Sounds/Tink.aiff")
+
+        try controller.prepare(url: first)
+        XCTAssertEqual(controller.playbackState, .ready)
+
+        try controller.prepare(url: second)
+        XCTAssertEqual(controller.playbackState, .ready)
+        XCTAssertGreaterThan(controller.playbackDuration, 0)
+
+        controller.play()
+        if case .failed(let message) = controller.playbackState {
+            XCTFail("Playback after reload failed: \(message)")
+        }
+        controller.stop()
+    }
+
+    func testSystemAudioStatusPermissionTitle() {
+        XCTAssertEqual(SystemAudioStatus.permissionRequired.title, "Permission Required")
+        XCTAssertTrue(SystemAudioStatus.permissionRequired.isTerminalFailure)
+        XCTAssertTrue(SystemAudioStatus.failed("x").isTerminalFailure)
+        XCTAssertFalse(SystemAudioStatus.running.isTerminalFailure)
+    }
+
+    func testSystemAudioModesCoverProductPaths() {
+        let modes = SystemAudioMode.allCases
+        XCTAssertEqual(modes.count, 3)
+        XCTAssertTrue(modes.contains(.disabled))
+        XCTAssertTrue(modes.contains(.systemEQ))
+        XCTAssertTrue(modes.contains(.externalLoopback))
+    }
+
+    func testPeakLimiterConfiguratorDoesNotThrow() {
+        let limiterDescription = AudioComponentDescription(
+            componentType: kAudioUnitType_Effect,
+            componentSubType: kAudioUnitSubType_PeakLimiter,
+            componentManufacturer: kAudioUnitManufacturer_Apple,
+            componentFlags: 0,
+            componentFlagsMask: 0
+        )
+        let limiter = AVAudioUnitEffect(audioComponentDescription: limiterDescription)
+        PeakLimiterConfigurator.applyDefaults(to: limiter)
+        XCTAssertFalse(limiter.bypass)
+    }
 }

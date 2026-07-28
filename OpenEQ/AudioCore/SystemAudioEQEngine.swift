@@ -18,23 +18,29 @@ final class SystemAudioEQEngine {
     private var tapID = AudioObjectID(kAudioObjectUnknown)
     private var aggDeviceID = AudioObjectID(kAudioObjectUnknown)
     private var aggIOProcID: AudioDeviceIOProcID?
-    private var origOutputID = AudioObjectID(kAudioObjectUnknown)
+    private var physicalOutputID = AudioObjectID(kAudioObjectUnknown)
     private var isRunning = false
+    private var isRebuilding = false
     private var sampleRate: Double = 48000
     private let dspState = SystemAudioDSPState()
+    private var isObservingDefaultOutput = false
+    private lazy var defaultOutputListener: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
+        self?.handleDefaultOutputChanged()
+    }
 
     deinit {
+        stopObservingDefaultOutput()
         stop()
     }
 
     func start(with preset: EQPreset) {
         guard #available(macOS 14.2, *) else {
-            onStatusChanged?(.failed("Requires macOS 14.2+"))
+            publishStatus(.failed("Requires macOS 14.2+"))
             return
         }
         stop()
         do {
-            origOutputID = try getDefaultOutputDeviceID()
+            physicalOutputID = try getDefaultOutputDeviceID()
             try setupTap()
             ioQueue.sync {
                 dspState.configure(preset, sampleRate: sampleRate)
@@ -42,29 +48,29 @@ final class SystemAudioEQEngine {
             try setupAggregateWithOutput()
             try setDefaultOutput(aggDeviceID)
             try startAggIO()
+            startObservingDefaultOutput()
             isRunning = true
-            latencyEstimate = Double(1024) / sampleRate * 3
-            status = .running
-            onStatusChanged?(.running)
+            latencyEstimate = estimateLatency()
+            publishStatus(.running)
             logger.info("System-wide EQ started on aggregate device")
         } catch {
             cleanup(restoreOutput: true)
-            let msg = (error as? SystemAudioEQError)?.localizedDescription ?? error.localizedDescription
-            status = .failed(msg)
-            onStatusChanged?(status)
-            logger.error("Start failed: \(msg)")
+            let mapped = mapStartError(error)
+            publishStatus(mapped)
+            logger.error("Start failed: \(mapped.title)")
         }
     }
 
     func stop() {
+        stopObservingDefaultOutput()
         cleanup(restoreOutput: true)
         ioQueue.sync {
             dspState.reset()
         }
         isRunning = false
-        status = .stopped
+        isRebuilding = false
         latencyEstimate = nil
-        onStatusChanged?(.stopped)
+        publishStatus(.stopped)
         logger.info("System-wide EQ stopped")
     }
 
@@ -81,27 +87,57 @@ final class SystemAudioEQEngine {
         }
     }
 
+    /// Rebuild when the user switches physical output (headphones, AirPods, etc.).
+    /// Never treats our own aggregate device as the physical destination.
     func rebuildAggregateWithCurrentOutput() {
-        guard isRunning, tapID != kAudioObjectUnknown else { return }
+        guard isRunning, tapID != kAudioObjectUnknown, !isRebuilding else { return }
 
-        logger.info("Rebuilding aggregate device for output change")
+        let currentDefault: AudioDeviceID
+        do {
+            currentDefault = try getDefaultOutputDeviceID()
+        } catch {
+            logger.error("Could not read default output during rebuild: \(error.localizedDescription)")
+            return
+        }
 
-        let savedPreset = EQPreset(name: "rebuild", mode: .graphic, bands: [], preamp: 0)
+        // Default is still our engine — nothing to do.
+        if currentDefault == aggDeviceID {
+            return
+        }
+
+        // Some event restored the previous physical device as default; reclaim it.
+        if currentDefault == physicalOutputID {
+            do {
+                try setDefaultOutput(aggDeviceID)
+            } catch {
+                logger.error("Failed to re-claim default output: \(error.localizedDescription)")
+            }
+            return
+        }
+
+        // User selected a new physical output device.
+        isRebuilding = true
+        logger.info("Rebuilding aggregate for new physical output \(currentDefault)")
 
         stopAggIO()
         destroyAggregate()
 
         do {
-            let newOutputID = try getDefaultOutputDeviceID()
-            origOutputID = newOutputID
+            physicalOutputID = currentDefault
             try setupAggregateWithOutput()
             try setDefaultOutput(aggDeviceID)
             try startAggIO()
+            latencyEstimate = estimateLatency()
+            isRebuilding = false
+            publishStatus(.running)
             logger.info("Aggregate device rebuilt with new output")
         } catch {
+            isRebuilding = false
             logger.error("Rebuild failed: \(error.localizedDescription)")
-            status = .failed("Device change failed: \(error.localizedDescription)")
-            onStatusChanged?(status)
+            cleanup(restoreOutput: true)
+            isRunning = false
+            latencyEstimate = nil
+            publishStatus(.failed("Device change failed: \(error.localizedDescription)"))
         }
     }
 
@@ -116,14 +152,20 @@ final class SystemAudioEQEngine {
 
         var newTapID = AudioObjectID(kAudioObjectUnknown)
         let err = AudioHardwareCreateProcessTap(desc, &newTapID)
-        guard err == noErr else { throw SystemAudioEQError.failed("Create tap: \(err)") }
+        guard err == noErr else {
+            throw SystemAudioEQError.tapCreateFailed(err)
+        }
         tapID = newTapID
         sampleRate = try getTapFormat().mSampleRate
         logger.info("Tap created, rate: \(sampleRate)")
     }
 
     private func setupAggregateWithOutput() throws {
-        let outputUID = try getDeviceUID(origOutputID)
+        guard physicalOutputID != kAudioObjectUnknown else {
+            throw SystemAudioEQError.failed("No physical output device")
+        }
+
+        let outputUID = try getDeviceUID(physicalOutputID)
         let tapUID = try getTapUID()
         let aggUID = "com.openeq.agg.\(UUID().uuidString)"
 
@@ -177,7 +219,11 @@ final class SystemAudioEQEngine {
 
     // MARK: - IO
 
-    private func handleIO(inData: UnsafePointer<AudioBufferList>, outData: UnsafeMutablePointer<AudioBufferList>, format: AVAudioFormat) {
+    private func handleIO(
+        inData: UnsafePointer<AudioBufferList>,
+        outData: UnsafeMutablePointer<AudioBufferList>,
+        format: AVAudioFormat
+    ) {
         let inBuffers = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: inData))
         let outBuffers = UnsafeMutableAudioBufferListPointer(outData)
         let channelCount = Int(format.channelCount)
@@ -207,92 +253,233 @@ final class SystemAudioEQEngine {
             dspState.process(destination, frames: frames, channel: channel)
         }
 
-        let analysisFrames = Int(firstInput.mDataByteSize) / MemoryLayout<Float>.size
+        // Analyze post-EQ output so spectrum matches what the user hears.
+        let analysisFrames = Int(outBuffers.first?.mDataByteSize ?? 0) / MemoryLayout<Float>.size
         if analysisFrames > 0,
-           let analysis = analyzer.analyze(bufferList: inData, frameLength: analysisFrames, sampleRate: sampleRate) {
+           let analysis = analyzer.analyze(bufferList: outData, frameLength: analysisFrames, sampleRate: sampleRate) {
             DispatchQueue.main.async { [weak self] in self?.onAnalysis?(analysis) }
         }
     }
 
+    // MARK: - Default output observation
+
+    private func handleDefaultOutputChanged() {
+        guard isRunning, !isRebuilding else { return }
+        // Debounce rapid Core Audio churn (Bluetooth hops, sleep/wake).
+        ioQueue.async { [weak self] in
+            // Hop back for property access + rebuild coordination.
+            DispatchQueue.main.async {
+                self?.rebuildAggregateWithCurrentOutput()
+            }
+        }
+    }
+
+    private func startObservingDefaultOutput() {
+        guard !isObservingDefaultOutput else { return }
+
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        let status = AudioObjectAddPropertyListenerBlock(
+            kOpenEQSysObj,
+            &address,
+            ioQueue,
+            defaultOutputListener
+        )
+        if status == noErr {
+            isObservingDefaultOutput = true
+        } else {
+            logger.warning("Could not observe default output changes: \(status)")
+        }
+    }
+
+    private func stopObservingDefaultOutput() {
+        guard isObservingDefaultOutput else { return }
+
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        AudioObjectRemovePropertyListenerBlock(
+            kOpenEQSysObj,
+            &address,
+            ioQueue,
+            defaultOutputListener
+        )
+        isObservingDefaultOutput = false
+    }
+
     // MARK: - Helpers
 
+    private func estimateLatency() -> TimeInterval {
+        // Tap buffer + aggregate IO + small safety margin.
+        Double(1024) / max(sampleRate, 1) * 3
+    }
+
+    private func publishStatus(_ newStatus: SystemAudioStatus) {
+        status = newStatus
+        onStatusChanged?(newStatus)
+    }
+
+    private func mapStartError(_ error: Error) -> SystemAudioStatus {
+        if let eqError = error as? SystemAudioEQError {
+            switch eqError {
+            case .tapCreateFailed(let code):
+                // Permission denials and privacy blocks typically surface as non-zero OSStatus.
+                if code == -1 || code == kAudioHardwareIllegalOperationError || code == kAudioHardwareNotRunningError {
+                    return .permissionRequired
+                }
+                return .failed(eqError.localizedDescription)
+            case .failed(let message):
+                if message.localizedCaseInsensitiveContains("permission")
+                    || message.localizedCaseInsensitiveContains("denied") {
+                    return .permissionRequired
+                }
+                return .failed(message)
+            }
+        }
+        return .failed(error.localizedDescription)
+    }
+
     private func getTapUID() throws -> CFString {
-        var addr = AudioObjectPropertyAddress(mSelector: kAudioTapPropertyUID, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+        var addr = AudioObjectPropertyAddress(
+            mSelector: kAudioTapPropertyUID,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
         let ptr = UnsafeMutablePointer<CFString?>.allocate(capacity: 1)
-        ptr.initialize(to: nil); defer { ptr.deinitialize(count: 1); ptr.deallocate() }
+        ptr.initialize(to: nil)
+        defer {
+            ptr.deinitialize(count: 1)
+            ptr.deallocate()
+        }
         var size = UInt32(MemoryLayout<CFString?>.size)
         let err = AudioObjectGetPropertyData(tapID, &addr, UInt32(0), nil, &size, ptr)
-        guard err == noErr, let uid = ptr.pointee else { throw SystemAudioEQError.failed("Get tap UID: \(err)") }
+        guard err == noErr, let uid = ptr.pointee else {
+            throw SystemAudioEQError.failed("Get tap UID: \(err)")
+        }
         return uid
     }
 
     private func getTapFormat() throws -> AudioStreamBasicDescription {
-        var addr = AudioObjectPropertyAddress(mSelector: kAudioTapPropertyFormat, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
-        var fmt = AudioStreamBasicDescription(); var size = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
+        var addr = AudioObjectPropertyAddress(
+            mSelector: kAudioTapPropertyFormat,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var fmt = AudioStreamBasicDescription()
+        var size = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
         let err = AudioObjectGetPropertyData(tapID, &addr, UInt32(0), nil, &size, &fmt)
         guard err == noErr else { throw SystemAudioEQError.failed("Get tap format: \(err)") }
         return fmt
     }
 
     private func getDefaultOutputDeviceID() throws -> AudioDeviceID {
-        var addr = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyDefaultOutputDevice, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
-        var outID = AudioObjectID(kAudioObjectUnknown); var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        var addr = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var outID = AudioObjectID(kAudioObjectUnknown)
+        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
         let err = AudioObjectGetPropertyData(kOpenEQSysObj, &addr, UInt32(0), nil, &size, &outID)
-        guard err == noErr, outID != kAudioObjectUnknown else { throw SystemAudioEQError.failed("No output device") }
+        guard err == noErr, outID != kAudioObjectUnknown else {
+            throw SystemAudioEQError.failed("No output device")
+        }
         return outID
     }
 
     private func getDeviceUID(_ deviceID: AudioDeviceID) throws -> String {
-        var addr = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyDeviceUID, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+        var addr = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyDeviceUID,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
         let ptr = UnsafeMutablePointer<CFString?>.allocate(capacity: 1)
-        ptr.initialize(to: nil); defer { ptr.deinitialize(count: 1); ptr.deallocate() }
+        ptr.initialize(to: nil)
+        defer {
+            ptr.deinitialize(count: 1)
+            ptr.deallocate()
+        }
         var size = UInt32(MemoryLayout<CFString?>.size)
         let err = AudioObjectGetPropertyData(deviceID, &addr, UInt32(0), nil, &size, ptr)
-        guard err == noErr, let uid = ptr.pointee else { throw SystemAudioEQError.failed("Get device UID: \(err)") }
+        guard err == noErr, let uid = ptr.pointee else {
+            throw SystemAudioEQError.failed("Get device UID: \(err)")
+        }
         return uid as String
     }
 
     private func setDefaultOutput(_ deviceID: AudioDeviceID) throws {
-        var addr = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyDefaultOutputDevice, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+        var addr = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
         var id = deviceID
-        let err = AudioObjectSetPropertyData(kOpenEQSysObj, &addr, UInt32(0), nil, UInt32(MemoryLayout<AudioDeviceID>.size), &id)
+        let err = AudioObjectSetPropertyData(
+            kOpenEQSysObj,
+            &addr,
+            UInt32(0),
+            nil,
+            UInt32(MemoryLayout<AudioDeviceID>.size),
+            &id
+        )
         guard err == noErr else { throw SystemAudioEQError.failed("Set default output: \(err)") }
     }
 
     // MARK: - Cleanup
 
     private func stopAggIO() {
-        if let p = aggIOProcID, aggDeviceID != kAudioObjectUnknown {
-            AudioDeviceStop(aggDeviceID, p); AudioDeviceDestroyIOProcID(aggDeviceID, p)
+        if let procID = aggIOProcID, aggDeviceID != kAudioObjectUnknown {
+            AudioDeviceStop(aggDeviceID, procID)
+            AudioDeviceDestroyIOProcID(aggDeviceID, procID)
         }
         aggIOProcID = nil
     }
 
     private func destroyAggregate() {
-        if aggDeviceID != kAudioObjectUnknown { AudioHardwareDestroyAggregateDevice(aggDeviceID); aggDeviceID = kAudioObjectUnknown }
+        if aggDeviceID != kAudioObjectUnknown {
+            AudioHardwareDestroyAggregateDevice(aggDeviceID)
+            aggDeviceID = kAudioObjectUnknown
+        }
     }
 
     private func destroyTap() {
-        if tapID != kAudioObjectUnknown { AudioHardwareDestroyProcessTap(tapID); tapID = kAudioObjectUnknown }
+        if tapID != kAudioObjectUnknown {
+            AudioHardwareDestroyProcessTap(tapID)
+            tapID = kAudioObjectUnknown
+        }
     }
 
     private func cleanup(restoreOutput: Bool = false) {
-        if restoreOutput, origOutputID != kAudioObjectUnknown {
-            try? setDefaultOutput(origOutputID)
+        if restoreOutput, physicalOutputID != kAudioObjectUnknown {
+            try? setDefaultOutput(physicalOutputID)
         }
         stopAggIO()
         destroyAggregate()
         destroyTap()
-        origOutputID = kAudioObjectUnknown
+        physicalOutputID = kAudioObjectUnknown
     }
 }
 
 enum SystemAudioEQError: LocalizedError {
     case failed(String)
+    case tapCreateFailed(OSStatus)
+
     var errorDescription: String? {
-        switch self { case .failed(let m): return "System EQ: \(m)" }
+        switch self {
+        case .failed(let message):
+            return "System EQ: \(message)"
+        case .tapCreateFailed(let code):
+            return "System EQ: Could not create process tap (OSStatus \(code)). Grant Screen & System Audio Recording permission in System Settings."
+        }
     }
 }
+
+// MARK: - DSP
 
 private struct BiquadCoefficients {
     let b0: Float
@@ -302,6 +489,10 @@ private struct BiquadCoefficients {
     let a2: Float
 
     static let identity = BiquadCoefficients(b0: 1, b1: 0, b2: 0, a1: 0, a2: 0)
+
+    var isIdentity: Bool {
+        b0 == 1 && b1 == 0 && b2 == 0 && a1 == 0 && a2 == 0
+    }
 
     static func normalized(
         b0: Float,
@@ -387,15 +578,26 @@ private struct BiquadState {
     var y2: Float = 0
 }
 
+/// Shared peak-limiter constants for system-wide DSP (keeps headroom after EQ boosts).
+enum SystemAudioLimiter {
+    static let ceiling: Float = 0.98
+    static let attack: Float = 0.35
+    static let release: Float = 0.0025
+}
+
 private final class SystemAudioDSPState {
     private var smoothingCoeffs = Array(repeating: SmoothingCoefficients(), count: 31)
     private var leftStates = Array(repeating: BiquadState(), count: 31)
     private var rightStates = Array(repeating: BiquadState(), count: 31)
+    private var currentInterpolated: [BiquadCoefficients] = Array(repeating: .identity, count: 31)
     private var preampLinear: Float = 1
+    private var targetPreampLinear: Float = 1
+    private var leftLimiterGain: Float = 1
+    private var rightLimiterGain: Float = 1
     var isBypassed = false
 
     func configure(_ preset: EQPreset, sampleRate: Double) {
-        preampLinear = pow(10, preset.preamp / 20)
+        targetPreampLinear = pow(10, preset.preamp / 20)
 
         for index in smoothingCoeffs.indices {
             guard index < preset.bands.count else {
@@ -414,6 +616,10 @@ private final class SystemAudioDSPState {
 
     func reset() {
         preampLinear = 1
+        targetPreampLinear = 1
+        leftLimiterGain = 1
+        rightLimiterGain = 1
+        isBypassed = false
         smoothingCoeffs = Array(repeating: SmoothingCoefficients(), count: 31)
         currentInterpolated = Array(repeating: .identity, count: 31)
         leftStates = Array(repeating: BiquadState(), count: 31)
@@ -423,27 +629,34 @@ private final class SystemAudioDSPState {
     func process(_ samples: UnsafeMutablePointer<Float>, frames: Int, channel: Int) {
         guard !isBypassed else { return }
 
-        if abs(preampLinear - 1) > 0.0001 {
-            var gain = preampLinear
-            vDSP_vsmul(samples, 1, &gain, samples, 1, vDSP_Length(frames))
-        }
-
-        // Build interpolated coefficients for this buffer once (channel 0 also advances smoothing)
+        // Smooth preamp so large fader jumps don't click.
         if channel == 0 {
+            let preampDelta = targetPreampLinear - preampLinear
+            if abs(preampDelta) > 0.00001 {
+                preampLinear += preampDelta * min(1, Float(frames) / 256)
+            } else {
+                preampLinear = targetPreampLinear
+            }
+
             currentInterpolated = smoothingCoeffs.indices.map { smoothingCoeffs[$0].interpolatedCoeffs() }
             for i in smoothingCoeffs.indices {
                 smoothingCoeffs[i].advance(frames: frames)
             }
         }
 
+        if abs(preampLinear - 1) > 0.0001 {
+            var gain = preampLinear
+            vDSP_vsmul(samples, 1, &gain, samples, 1, vDSP_Length(frames))
+        }
+
         if channel == 0 {
             processFilters(samples, frames: frames, states: &leftStates)
+            applyPeakLimiter(samples, frames: frames, gain: &leftLimiterGain)
         } else {
             processFilters(samples, frames: frames, states: &rightStates)
+            applyPeakLimiter(samples, frames: frames, gain: &rightLimiterGain)
         }
     }
-
-    private var currentInterpolated: [BiquadCoefficients] = []
 
     private func processFilters(
         _ samples: UnsafeMutablePointer<Float>,
@@ -452,13 +665,7 @@ private final class SystemAudioDSPState {
     ) {
         for band in currentInterpolated.indices {
             let coeff = currentInterpolated[band]
-            if coeff.b0 == 1,
-               coeff.b1 == 0,
-               coeff.b2 == 0,
-               coeff.a1 == 0,
-               coeff.a2 == 0 {
-                continue
-            }
+            if coeff.isIdentity { continue }
 
             var state = states[band]
             for index in 0..<frames {
@@ -475,6 +682,27 @@ private final class SystemAudioDSPState {
                 state.y1 = output
             }
             states[band] = state
+        }
+    }
+
+    private func applyPeakLimiter(
+        _ samples: UnsafeMutablePointer<Float>,
+        frames: Int,
+        gain: inout Float
+    ) {
+        let ceiling = SystemAudioLimiter.ceiling
+        for index in 0..<frames {
+            let absSample = abs(samples[index])
+            let needed = absSample > ceiling ? ceiling / absSample : 1
+            if needed < gain {
+                gain += (needed - gain) * SystemAudioLimiter.attack
+            } else {
+                gain += (1 - gain) * SystemAudioLimiter.release
+            }
+            var out = samples[index] * gain
+            if out > 1 { out = 1 }
+            if out < -1 { out = -1 }
+            samples[index] = out
         }
     }
 
@@ -519,7 +747,7 @@ private final class SystemAudioDSPState {
                 b1: -2 * amplitude * ((amplitude - 1) + (amplitude + 1) * cosine),
                 b2: amplitude * ((amplitude + 1) + (amplitude - 1) * cosine - beta),
                 a0: (amplitude + 1) - (amplitude - 1) * cosine + beta,
-                a1: 2 * ((amplitude - 1) - (amplitude + 1) * cosine),
+                a1: 2 * ((amplitude - 1) + (amplitude + 1) * cosine),
                 a2: (amplitude + 1) - (amplitude - 1) * cosine - beta
             )
         case .lowPass:

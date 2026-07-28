@@ -34,11 +34,13 @@ struct SystemAudioView: View {
                     case .externalLoopback:
                         externalLoopbackSection
                     }
+
+                    safeModeSection
                 }
                 .padding(16)
             }
         }
-        .frame(width: 420, height: 520)
+        .frame(width: 420, height: 560)
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear { viewModel.refreshSystemAudioDevices() }
     }
@@ -77,7 +79,7 @@ struct SystemAudioView: View {
                         .font(.caption2)
                         .foregroundStyle(.green)
 
-                    Label("Requires macOS 14.2+ and Screen/System Audio Recording permission", systemImage: "shield")
+                    Label("Requires macOS 14.2+ and Screen & System Audio Recording permission", systemImage: "shield")
                         .font(.caption2)
                         .foregroundStyle(.orange)
 
@@ -116,6 +118,10 @@ struct SystemAudioView: View {
         VStack(spacing: 12) {
             statusPanel
 
+            if viewModel.systemAudioStatus == .permissionRequired {
+                permissionRecoveryPanel
+            }
+
             systemEQControls
 
             systemEQStatus
@@ -125,23 +131,70 @@ struct SystemAudioView: View {
         .cornerRadius(8)
     }
 
-    private var systemEQControls: some View {
-        Button {
-            if viewModel.systemAudioStatus == .running {
-                viewModel.stopSystemEQMode()
-            } else {
-                viewModel.startSystemEQMode()
-            }
-        } label: {
+    private var permissionRecoveryPanel: some View {
+        VStack(alignment: .leading, spacing: 8) {
             Label(
-                viewModel.systemAudioStatus == .running ? "Stop" : "Start",
-                systemImage: viewModel.systemAudioStatus == .running ? "stop.fill" : "play.fill"
+                "Screen & System Audio Recording permission is required.",
+                systemImage: "lock.shield"
             )
             .font(.caption)
-            .frame(maxWidth: .infinity)
+            .foregroundStyle(.orange)
+            .fixedSize(horizontal: false, vertical: true)
+
+            Text("Open System Settings, enable OpenEQ under Privacy & Security → Screen & System Audio Recording, then start again.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Button {
+                viewModel.openSystemAudioPrivacySettings()
+            } label: {
+                Label("Open Privacy Settings", systemImage: "gear")
+                    .font(.caption)
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
         }
-        .buttonStyle(.borderedProminent)
-        .controlSize(.small)
+        .padding(10)
+        .background(Color.orange.opacity(0.08))
+        .cornerRadius(6)
+    }
+
+    private var systemEQControls: some View {
+        HStack(spacing: 8) {
+            Button {
+                if viewModel.systemAudioStatus == .running {
+                    viewModel.stopSystemEQMode()
+                } else {
+                    viewModel.startSystemEQMode()
+                }
+            } label: {
+                Label(
+                    viewModel.systemAudioStatus == .running ? "Stop" : "Start",
+                    systemImage: viewModel.systemAudioStatus == .running ? "stop.fill" : "play.fill"
+                )
+                .font(.caption)
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+
+            Button {
+                viewModel.setEnabled(!viewModel.isEnabled)
+            } label: {
+                Label(
+                    viewModel.isEnabled ? "EQ On" : "Bypassed",
+                    systemImage: viewModel.isEnabled ? "waveform" : "waveform.slash"
+                )
+                .font(.caption)
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .tint(viewModel.isEnabled ? nil : .orange)
+            .disabled(viewModel.systemAudioStatus != .running)
+        }
     }
 
     private var systemEQStatus: some View {
@@ -154,6 +207,13 @@ struct SystemAudioView: View {
                 Text(systemAudioLatencyText)
                     .font(.caption2.monospacedDigit())
                     .foregroundStyle(.secondary)
+            }
+
+            if viewModel.systemAudioStatus == .running {
+                Text(viewModel.isEnabled ? "EQ active on system audio" : "Passthrough (EQ bypassed)")
+                    .font(.caption2)
+                    .foregroundStyle(viewModel.isEnabled ? .green : .orange)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
     }
@@ -212,42 +272,58 @@ struct SystemAudioView: View {
                                 viewModel.startExternalLoopbackMode()
                             }
                         } label: {
-                            Label(viewModel.isExternalLoopbackActive ? "Stop" : "Start", systemImage: viewModel.isExternalLoopbackActive ? "stop.fill" : "play.fill")
-                                .font(.caption)
-                                .frame(maxWidth: .infinity)
+                            Label(
+                                viewModel.isExternalLoopbackActive ? "Stop" : "Start",
+                                systemImage: viewModel.isExternalLoopbackActive ? "stop.fill" : "play.fill"
+                            )
+                            .font(.caption)
+                            .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.borderedProminent)
                         .controlSize(.small)
 
                         Button {
-                            viewModel.setExternalLoopbackBypassed(!viewModel.isExternalLoopbackBypassed)
+                            viewModel.setEnabled(!viewModel.isEnabled)
                         } label: {
-                            Label(viewModel.isExternalLoopbackBypassed ? "Bypassed" : "Bypass", systemImage: "power")
-                                .font(.caption)
-                                .frame(maxWidth: .infinity)
+                            Label(
+                                viewModel.isEnabled ? "EQ On" : "Bypassed",
+                                systemImage: viewModel.isEnabled ? "waveform" : "waveform.slash"
+                            )
+                            .font(.caption)
+                            .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.bordered)
                         .controlSize(.small)
-                        .tint(viewModel.isExternalLoopbackBypassed ? .orange : nil)
+                        .tint(viewModel.isEnabled ? nil : .orange)
+                        .disabled(!viewModel.isExternalLoopbackActive)
                     }
-
-                    Button(role: .destructive) {
-                        viewModel.stopExternalLoopbackMode()
-                    } label: {
-                        Label("Emergency Stop", systemImage: "exclamationmark.octagon.fill")
-                            .font(.caption)
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
                 }
             }
         }
     }
 
+    private var safeModeSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Safety")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            Button(role: .destructive) {
+                viewModel.enterSafeMode()
+            } label: {
+                Label("Emergency Stop / Safe Mode", systemImage: "exclamationmark.octagon.fill")
+                    .font(.caption)
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .help("Immediately stop system processing and restore the original output device.")
+        }
+    }
+
     private var statusPanel: some View {
         VStack(spacing: 4) {
-            Label(viewModel.systemAudioStatus.title, systemImage: "smallcircle.filled.circle")
+            Label(viewModel.systemAudioStatus.title, systemImage: statusIcon)
                 .font(.caption2)
                 .foregroundStyle(statusColor)
 
@@ -286,8 +362,21 @@ struct SystemAudioView: View {
     }
 
     private var latencyText: String {
+        if viewModel.systemAudioMode == .systemEQ {
+            return systemAudioLatencyText
+        }
         guard let latency = viewModel.externalLoopbackLatency else { return "-- ms" }
         return "\(Int(latency * 1000)) ms"
+    }
+
+    private var statusIcon: String {
+        switch viewModel.systemAudioStatus {
+        case .running: return "checkmark.circle.fill"
+        case .ready: return "smallcircle.filled.circle"
+        case .failed: return "xmark.octagon.fill"
+        case .permissionRequired: return "lock.shield"
+        case .unavailable, .stopped: return "pause.circle"
+        }
     }
 
     private var statusColor: Color {
@@ -330,5 +419,5 @@ struct SystemAudioView: View {
     SystemAudioView(
         viewModel: OpenEQViewModel(audioEngineController: AudioEngineController())
     )
-    .frame(width: 420, height: 520)
+    .frame(width: 420, height: 560)
 }

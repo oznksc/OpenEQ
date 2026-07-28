@@ -31,4 +31,13 @@ enum SystemAudioStatus: Equatable, Codable {
             return "Failed: \(message)"
         }
     }
+
+    var isTerminalFailure: Bool {
+        switch self {
+        case .failed, .permissionRequired:
+            return true
+        default:
+            return false
+        }
+    }
 }

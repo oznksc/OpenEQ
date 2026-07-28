@@ -38,6 +38,7 @@ final class ExternalLoopbackEngine {
             componentFlagsMask: 0
         )
         self.limiter = AVAudioUnitEffect(audioComponentDescription: limiterDescription)
+        PeakLimiterConfigurator.applyDefaults(to: limiter)
     }
 
     func configure(inputDevice: AudioDevice?, outputDevice: AudioDevice?) {
@@ -93,6 +94,7 @@ final class ExternalLoopbackEngine {
 
     func setBypassed(_ isBypassed: Bool) {
         self.isBypassed = isBypassed
+        // EQ can be bypassed for A/B; limiter stays on for headroom safety.
         eq.bypass = isBypassed
         limiter.bypass = false
     }

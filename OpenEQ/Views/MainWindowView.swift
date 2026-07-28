@@ -94,12 +94,22 @@ struct MainWindowView: View {
             .buttonStyle(.bordered)
             .controlSize(.small)
 
+            if !viewModel.isEnabled {
+                Text("BYPASSED")
+                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.orange)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.orange.opacity(0.12))
+                    .cornerRadius(12)
+            }
+
             HStack(spacing: 6) {
                 Circle()
                     .fill(statusColor)
                     .frame(width: 6, height: 6)
 
-                Text(viewModel.playbackState.title.uppercased())
+                Text(statusLabel)
                     .font(.system(size: 9, weight: .bold, design: .monospaced))
                     .foregroundStyle(.secondary)
             }
@@ -111,7 +121,21 @@ struct MainWindowView: View {
         .padding(.horizontal, 16)
     }
 
+    private var statusLabel: String {
+        if viewModel.isSystemEQActive {
+            return "SYSTEM EQ"
+        }
+        if viewModel.isExternalLoopbackActive {
+            return "LOOPBACK"
+        }
+        return viewModel.playbackState.title.uppercased()
+    }
+
     private var statusColor: Color {
+        if viewModel.isSystemEQActive || viewModel.isExternalLoopbackActive {
+            return viewModel.isEnabled ? .green : .orange
+        }
+
         switch viewModel.playbackState {
         case .playing: return .green
         case .paused: return .orange

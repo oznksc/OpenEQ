@@ -1,32 +1,30 @@
-# System Audio Beta
+# System Audio
 
-OpenEQ V1 is built around local audio file playback. Files are decoded in the app, processed through the EQ graph, visualized locally, and played through the app output path.
-
-System Audio Beta is the foundation for future system-audio workflows. It does not ship a virtual audio driver and should not be described as true system-wide EQ yet.
+OpenEQ can process system-wide audio on macOS 14.2+ using a Core Audio process tap and a private aggregate device. External loopback (BlackHole) remains available as an advanced fallback.
 
 ## Modes
 
-- Disabled: OpenEQ uses local file playback only.
-- Monitor Only: OpenEQ can inspect a selected input device for analysis-style workflows.
-- External Loopback: OpenEQ expects the user to route macOS output through a virtual audio device such as BlackHole, then select that device as OpenEQ input.
-- Native Tap Experimental: A future exploration path for Core Audio process/system taps. This is not production routing in V1.
+- **Disabled**: EQ applies only to local file playback.
+- **System-Wide EQ**: Captures system audio via `CATapDescription`, runs OpenEQ biquad EQ + peak limiter, and plays through a private aggregate device that includes the current physical output.
+- **External Loopback**: User routes macOS output through a virtual device such as BlackHole, then OpenEQ processes that input with `AVAudioEngine`.
 
-## Why System-Wide EQ Is Experimental
+## Permissions
 
-macOS system-wide EQ requires capturing or routing audio that normally belongs to other apps, processing it in real time, then sending it back to an output device with stable latency and no feedback loop. A production-quality implementation usually needs careful Core Audio routing, permission handling, device-change handling, latency compensation, and in some designs a virtual audio driver.
+System-Wide EQ requires **Screen & System Audio Recording** permission. The first tap creation triggers the system prompt. If denied, OpenEQ surfaces a recovery path that opens System Settings.
 
-OpenEQ V1 intentionally avoids claiming this is complete.
+Privacy strings are declared in the app Info.plist:
 
-## Safest V1 Approach
+- `NSAudioCaptureUsageDescription`
+- `NSMicrophoneUsageDescription` (external loopback input devices)
 
-External loopback is the safest V1 path because routing is explicit and reversible:
+## Stability guarantees (Phase 1)
 
-1. Install a virtual audio device such as BlackHole.
-2. Route macOS or app output to that virtual device.
-3. Select the virtual device as OpenEQ's system input.
-4. Select the desired physical output device for monitoring.
-
-This keeps driver responsibility outside OpenEQ while giving the app a clean path to process incoming audio.
+- Aggregate rebuild never treats OpenEQ's own aggregate as the physical destination device.
+- Default-output changes (headphones, AirPods, HDMI) rebuild the aggregate against the new physical device.
+- Device-list churn is debounced to avoid rebuild storms.
+- EQ bypass is unified across local, system, and loopback paths; the peak limiter stays engaged when EQ is bypassed.
+- **Emergency Stop / Safe Mode** immediately stops processing and restores the original default output.
+- App termination restores the original default output via `shutdown()`.
 
 ## Privacy
 

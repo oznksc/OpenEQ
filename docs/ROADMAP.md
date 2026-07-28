@@ -10,13 +10,15 @@ This document outlines the comprehensive development roadmap for the **OpenEQ** 
 gantt
     title OpenEQ Roadmap Development Schedule
     dateFormat  YYYY-MM
+    section Phase 0: Ship the Truth
+    Honest product positioning & docs    :done, p0_1, 2026-07, 1w
     section Phase 1: V1.0 Stabilization
-    Bug Fixes and DSP Stability          :active, p1_1, 2026-07, 2M
-    XCTest Unit & Performance Tests      :p1_2, 2026-08, 1M
+    Bug Fixes and DSP Stability          :done, p1_1, 2026-07, 1M
+    XCTest Unit & Performance Tests      :done, p1_2, 2026-07, 1M
     section Phase 2: System Audio Routing
-    Driverless Loopback Mode Dev         :p2_1, 2026-09, 2M
-    Core Audio HAL/DriverKit Research    :p2_2, 2026-10, 2M
-    Feedback Loop Protection Algorithm   :p2_3, 2026-11, 1M
+    Driverless Loopback Mode Dev         :active, p2_1, 2026-08, 2M
+    Core Audio HAL/DriverKit Research    :p2_2, 2026-09, 2M
+    Feedback Loop Protection Algorithm   :p2_3, 2026-10, 1M
     section Phase 3: Advanced DSP & Parametric EQ
     Interactive Node Dragging UI         :p3_1, 2026-12, 2M
     Dynamic Range Compressor & Limiter   :p3_2, 2027-01, 2M
@@ -28,22 +30,28 @@ gantt
 
 ---
 
-## 🛠️ PHASE 1: V1.0 Stability, DSP Improvements & Infrastructure (Q3 2026)
+## ✅ PHASE 0: Ship the Truth
 
-**Focus:** Stabilizing the existing local player, 10/31-band graphic equalizer, and 5-band parametric equalizer architecture, preventing memory leaks, and expanding test coverage.
+**Status:** Done. README and docs state what is production vs experimental. System-wide EQ is not oversold.
+
+## ✅ PHASE 1: V1.0 Stability, DSP Improvements & Infrastructure (Q3 2026)
+
+**Status:** Core complete. Focus was stabilizing local + system paths so the app “never cracks.”
 
 ### 1.1. Core DSP Improvements & Output Engine Stability
-*   **Dynamic Sample Rate Synchronization:** Strengthening the reconnection logic (`connectGraph`) on AVAudioEngine to prevent audio pops/glitches when switching between files with different sample rates (44.1 kHz, 48 kHz, 96 kHz) during local playback.
-*   **Smooth Transition of Biquad Filter Coefficients (Parameter Smoothing):** Smoothing the changes in filter coefficients (using linear interpolation or a low-pass filter) instead of abrupt steps when equalizer faders are moved. This avoids digital clicks and crackling during active fader dragging.
-*   **Clipping Prevention Infrastructure:** Integrating a basic Peak Limiter or automatic headroom adjustment to prevent digital clipping when the sum of preamp and band gains exceeds 0 dB.
+*   **Dynamic Sample Rate Synchronization:** Strengthened `connectGraph` / prepare path for file format changes (local playback).
+*   **Parameter Smoothing:** Biquad coefficient interpolation + preamp smoothing on the system DSP path.
+*   **Clipping Prevention:** Peak limiter on local/loopback (`AVAudioUnit` peak limiter) and system path (custom peak limiter). Limiter stays on when EQ is bypassed.
+*   **Device change safety:** Physical output tracking so aggregate rebuild never loops on OpenEQ’s own device; debounced device churn; emergency safe mode.
 
 ### 1.2. UI/UX Polish
-*   **EQ Curve Visualization (EQ Curve View) Enhancement:** Implementing a combined transfer function curve that displays the joint effect of the 10/31-band graphic EQ and the 5-band parametric EQ in real-time.
-*   **FFT Spectrum Analyzer Modes:** Introducing peak hold, adjustable decay times, and log-scaled frequency axis rendering options.
-*   **Menu Bar Integration (MenuBarView) Enhancements:** Quick volume slider access, status colors for EQ bypass, and quick switching between the last 3 active presets from the system menu bar.
+*   **Menu bar:** Volume slider, bypass status, last 3 presets, system EQ status, emergency stop.
+*   **Permission recovery:** Deep link to Screen & System Audio Recording settings.
+*   **Latency readout** on system audio UI.
+*   Remaining polish (peak-hold spectrum modes, richer EQ curve): still open.
 
-### 1.3. Testing Infrastructure Setup
-*   Writing detailed XCTest unit tests covering DSP conversions (Decibel -> Linear, etc.) and player state machines (see `docs/TESTING_STRATEGY.md` for details).
+### 1.3. Testing Infrastructure
+*   XCTest coverage for EQBand, presets, spectrum, local engine lifecycle, dB math, limiter configurator (see `docs/TESTING_STRATEGY.md`).
 
 ---
 
@@ -126,10 +134,11 @@ gantt
 
 ## 📈 Release Matrix
 
-| Feature / Component | V1.0 (Current/Stable) | V1.5 (End of Phase 1) | V2.0 (End of Phase 2) | V3.0 (Phase 3 & 4) |
-| :--- | :--- | :--- | :--- | :--- |
-| **Audio Source** | Local Files (MP3/WAV) | Local + Basic Monitor Tap | Full System Audio Routing | Multi-channel Input / Network |
-| **Graphic EQ Bands** | 10 & 31 Bands | 10 & 31 Bands (Smooth) | Driver-compatible 31-Band | Unlimited / AutoEQ Profiles |
-| **Parametric EQ** | 5 Bands (Basic Control) | 5 Bands + Curve Display | 8 Bands + Node Dragging | Dynamic Bands + AUv3 Hosting |
-| **Latency** | ~20ms - 50ms | < 15ms | < 5ms (Virtual Driver) | Near Zero (< 2.5ms) |
-| **OS Compatibility** | macOS 14.0+ | macOS 14.0+ | macOS 14.2+ (Advanced HAL) | macOS, iPadOS, visionOS |
+| Feature / Component | V1.0 (Now — Phase 0/1) | V2.0 (End of Phase 2) | V3.0 (Phase 3 & 4) |
+| :--- | :--- | :--- | :--- |
+| **Audio Source** | Local files + experimental System-Wide EQ (CATap) | Full routing + optional virtual driver | Multi-channel / network |
+| **Graphic EQ Bands** | 10 & 31 (smoothed system DSP) | Driver-compatible 31-band | Unlimited / AutoEQ profiles |
+| **Parametric EQ** | 5 bands + curve view | 8 bands + node dragging | Dynamic bands + AUv3 hosting |
+| **Latency** | ~buffer-dependent (shown in UI) | Lower with virtual driver | Near zero (&lt; 2.5ms goal) |
+| **OS Compatibility** | macOS 14.0+ (local), 14.2+ (system EQ) | macOS 14.2+ | macOS, iPadOS, visionOS |
+| **Safety** | Unified bypass, peak limiter, safe mode | Feedback / howling guard | — |
