@@ -184,6 +184,12 @@ final class SystemAudioManager {
         selectedOutputDevice = selectedOutputDevice.flatMap { cur in outputs.first { $0.id == cur.id } }
             ?? outputs.first(where: \.isDefaultOutput) ?? outputs.first
 
+        if mode == .systemEQ, status == .running {
+            systemAudioEQEngine.rebuildAggregateWithCurrentOutput()
+            systemAudioLatency = systemAudioEQEngine.latencyEstimate
+            status = systemAudioEQEngine.status
+        }
+
         updateStatusForCurrentMode()
     }
 

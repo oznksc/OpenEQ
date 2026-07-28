@@ -81,6 +81,30 @@ final class SystemAudioEQEngine {
         }
     }
 
+    func rebuildAggregateWithCurrentOutput() {
+        guard isRunning, tapID != kAudioObjectUnknown else { return }
+
+        logger.info("Rebuilding aggregate device for output change")
+
+        let savedPreset = EQPreset(name: "rebuild", mode: .graphic, bands: [], preamp: 0)
+
+        stopAggIO()
+        destroyAggregate()
+
+        do {
+            let newOutputID = try getDefaultOutputDeviceID()
+            origOutputID = newOutputID
+            try setupAggregateWithOutput()
+            try setDefaultOutput(aggDeviceID)
+            try startAggIO()
+            logger.info("Aggregate device rebuilt with new output")
+        } catch {
+            logger.error("Rebuild failed: \(error.localizedDescription)")
+            status = .failed("Device change failed: \(error.localizedDescription)")
+            onStatusChanged?(status)
+        }
+    }
+
     // MARK: - Setup
 
     @available(macOS 14.2, *)
