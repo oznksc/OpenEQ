@@ -90,6 +90,16 @@ struct MenuBarView: View {
                 Divider()
             }
 
+            Button {
+                viewModel.toggleSystemEQOneClick()
+                NSApplication.shared.activate(ignoringOtherApps: true)
+            } label: {
+                Label(
+                    viewModel.isSystemEQActive ? "Stop System EQ" : "Start System EQ",
+                    systemImage: viewModel.isSystemEQActive ? "stop.circle" : "play.circle"
+                )
+            }
+
             if viewModel.isSystemEQActive || viewModel.isExternalLoopbackActive {
                 Label(
                     viewModel.isSystemEQActive ? "System EQ Running" : "Loopback Running",
@@ -104,6 +114,12 @@ struct MenuBarView: View {
                     Text(String(format: "Latency ~%.0f ms", latency * 1000))
                         .font(.caption2)
                         .foregroundStyle(.secondary)
+                }
+
+                if viewModel.didTripFeedbackProtection {
+                    Button("Resume after feedback trip") {
+                        viewModel.clearFeedbackProtectionTrip()
+                    }
                 }
 
                 Button("Emergency Stop") {

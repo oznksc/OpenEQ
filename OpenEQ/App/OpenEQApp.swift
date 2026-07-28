@@ -20,7 +20,10 @@ struct OpenEQApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView(viewModel: viewModel)
-                .onAppear { appDelegate.viewModel = viewModel }
+                .onAppear {
+                    appDelegate.viewModel = viewModel
+                    viewModel.handleAppLaunch()
+                }
         }
         .windowResizability(.contentMinSize)
         .defaultSize(width: 1100, height: 700)

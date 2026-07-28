@@ -12,9 +12,9 @@ Current technical status, completed work, open gaps, roadmap, and test protocols
 | Graphic 10/31 + parametric 5 | **Production** | Shared preset model across engines |
 | Spectrum / meters | **Production** | vDSP FFT, clipping indicator |
 | Presets + menu bar | **Production** | JSON store, recent presets, volume, emergency stop |
-| System-Wide EQ (CATap) | **Experimental** | Smoothing, peak limiter, device rebuild, safe mode |
+| System-Wide EQ (CATap) | **Production-grade experimental** | One-click, feedback guard, sleep/wake, device profiles |
 | External loopback | **Advanced / beta** | Requires BlackHole + correct macOS I/O defaults |
-| Virtual driver (HAL/DriverKit) | **Not started** | Phase 2 |
+| Virtual driver (HAL/DriverKit) | **Researched / deferred** | See `docs/virtual-driver.md` — CATap is primary |
 | AutoEQ / AUv3 / iOS | **Not started** | Phase 3–4 |
 
 ### Honesty rules (Phase 0)
@@ -34,14 +34,20 @@ Current technical status, completed work, open gaps, roadmap, and test protocols
 6. **Permission + safe mode UX** — privacy strings, System Settings deep link, emergency stop restores default output.
 7. **Unit tests** — EQBand/preset/spectrum/engine prepare-play-stop, dB math, sample-rate style reload, limiter configurator.
 
+### Completed in Phase 2 (routing & safety)
+
+1. **One-click System EQ** — header, menu bar, onboarding sheet; driverless CATap primary path.
+2. **FeedbackGuard** — sustained hot-signal mute on system + loopback paths.
+3. **Sleep/wake recovery** — resume System EQ after Mac sleep when left enabled.
+4. **Device-specific profiles** — UID → preset map in Application Support.
+5. **Virtual driver decision** — research doc; HAL/DriverKit deferred, not faked.
+
 ### Remaining gaps
 
 | Gap | Severity | Target phase |
 |-----|----------|--------------|
-| System EQ edge cases (sleep/wake, some BT hops) | High | Phase 1 follow-ups / Phase 2 |
-| Feedback / howling detector | High | Phase 2 |
-| One-click onboarding polish | Medium | Phase 2 |
-| Embedded virtual driver (no BlackHole) | High for product | Phase 2 |
+| Real bundled virtual output device | Medium | Phase 2.5 / later |
+| Stronger correlation-based feedback detection | Medium | Phase 2 follow-up |
 | Interactive parametric node UI | Medium | Phase 3 |
 | AutoEQ headphone library | Medium (love feature) | Phase 4 |
 
@@ -60,9 +66,9 @@ graph TD
     C --> D[Phase 3: Advanced DSP & AUv3]
     D --> E[Phase 4: AutoEQ & multi-platform]
 
-    class A,B done;
-    class C next;
-    class D,E later;
+    class A,B,C done;
+    class D next;
+    class E later;
 ```
 
 ### Phase 0 — Ship the truth ✅
@@ -74,10 +80,11 @@ graph TD
 - Unified DSP policy, safe mode, permission recovery
 - Expanded XCTest coverage
 
-### Phase 2 — Production system routing
-- Optional bundled virtual device / HAL or DriverKit path
-- Stronger feedback protection
-- One-button System EQ onboarding
+### Phase 2 — Production system routing ✅ (core)
+- One-button System EQ onboarding (driverless CATap)
+- Feedback / howling protection + sleep/wake recovery
+- Device-specific EQ profiles
+- HAL/DriverKit researched and deferred (see virtual-driver.md)
 
 ### Phase 3 — Advanced sound design
 - Interactive parametric graph (drag nodes, scroll Q)

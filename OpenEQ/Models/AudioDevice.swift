@@ -10,6 +10,8 @@ import Foundation
 
 struct AudioDevice: Identifiable, Equatable {
     let id: AudioDeviceID
+    /// Persistent Core Audio device UID (stable across reboots; preferred for profiles).
+    let uid: String?
     let name: String
     let manufacturer: String?
     let isInput: Bool
@@ -21,5 +23,10 @@ struct AudioDevice: Identifiable, Equatable {
 
     var isBlackHole: Bool {
         name.localizedCaseInsensitiveContains("BlackHole")
+    }
+
+    /// Stable key for device-specific EQ profiles.
+    var profileKey: String {
+        uid ?? "id:\(id)"
     }
 }

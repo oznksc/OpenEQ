@@ -135,6 +135,15 @@ final class OpenEQViewModel {
     var systemAudioLatency: TimeInterval?
     /// Most recently used presets for menu-bar quick switching (newest first).
     var recentPresets: [EQPreset] = []
+    var deviceProfiles: [DeviceEQProfile] = []
+    var activePhysicalOutputName: String?
+    var activePhysicalOutputUID: String?
+    var didTripFeedbackProtection = false
+    var showSystemEQOnboarding = false
+    var autoApplyDeviceProfiles: Bool = AppPreferences.autoApplyDeviceProfiles
+    var feedbackProtectionEnabled: Bool = AppPreferences.feedbackProtectionEnabled
+    var preferSystemEQOnLaunch: Bool = AppPreferences.preferSystemEQOnLaunch
+    var safetyBannerMessage: String?
 
     var playbackDuration: TimeInterval {
         audioEngineController.playbackDuration
@@ -147,8 +156,10 @@ final class OpenEQViewModel {
     private let audioEngineController: AudioEngineController
     private let systemAudioManager: SystemAudioManager
     private let presetStore = PresetStore()
+    private let deviceProfileStore = DeviceProfileStore()
     private var graphicBands: [EQBand]
     private var parametricBands: [EQBand]
+    private var isApplyingDeviceProfile = false
 
     convenience init(audioEngineController: AudioEngineController) {
         self.init(
@@ -189,11 +200,30 @@ final class OpenEQViewModel {
         self.isSystemAudioBypassed = systemAudioManager.isSystemAudioBypassed
         self.systemAudioLatency = systemAudioManager.systemAudioLatency
         self.recentPresets = [initialPreset]
+        self.deviceProfiles = deviceProfileStore.loadProfiles()
+        self.activePhysicalOutputName = systemAudioManager.activePhysicalOutputName
+        self.activePhysicalOutputUID = systemAudioManager.activePhysicalOutputUID
+        self.didTripFeedbackProtection = systemAudioManager.didTripFeedbackProtection
+        self.showSystemEQOnboarding = !AppPreferences.hasCompletedSystemEQOnboarding
 
         self.audioEngineController.currentGraphicBandCount = .ten
         self.audioEngineController.applyPreset(initialPreset)
         self.audioEngineController.setVolume(volume)
         self.audioEngineController.setMuted(isMuted)
+
+        self.systemAudioManager.onPhysicalOutputChanged = { [weak self] uid, name in
+            self?.handlePhysicalOutputChanged(uid: uid, name: name)
+        }
+        self.systemAudioManager.onSafetyTrip = { [weak self] in
+            self?.handleSafetyTrip()
+        }
+    }
+
+    /// Called once from the app root after the UI is ready.
+    func handleAppLaunch() {
+        if preferSystemEQOnLaunch {
+            enableSystemEQOneClick()
+        }
     }
 
     // MARK: - Playback Controls
@@ -298,20 +328,141 @@ final class OpenEQViewModel {
     func startSystemEQMode() {
         stop()
         systemAudioManager.setSystemAudioBypassed(!isEnabled)
+        systemAudioManager.setFeedbackProtectionEnabled(feedbackProtectionEnabled)
         systemAudioManager.startSystemEQ(preset: currentActivePreset())
         syncSystemAudioState()
+        applyDeviceProfileIfNeeded(forUID: systemAudioManager.activePhysicalOutputUID)
+
         if case .failed(let message) = systemAudioStatus {
             errorMessage = message
         } else if systemAudioStatus == .permissionRequired {
             errorMessage = "Grant Screen & System Audio Recording permission, then try again."
+            isShowingSystemAudio = true
         } else {
             errorMessage = nil
+            completeSystemEQOnboardingIfNeeded()
         }
     }
 
     func stopSystemEQMode() {
         systemAudioManager.stopSystemEQ()
         syncSystemAudioState()
+    }
+
+    /// One-button path: switch to System-Wide EQ and start (driverless CATap).
+    func enableSystemEQOneClick() {
+        isShowingSystemAudio = true
+        if systemAudioMode != .systemEQ {
+            systemAudioManager.setMode(.systemEQ)
+            syncSystemAudioState()
+        }
+        startSystemEQMode()
+    }
+
+    func toggleSystemEQOneClick() {
+        if isSystemEQActive {
+            stopSystemEQMode()
+            systemAudioManager.setMode(.disabled)
+            syncSystemAudioState()
+        } else {
+            enableSystemEQOneClick()
+        }
+    }
+
+    func completeSystemEQOnboardingIfNeeded() {
+        if !AppPreferences.hasCompletedSystemEQOnboarding {
+            AppPreferences.hasCompletedSystemEQOnboarding = true
+            showSystemEQOnboarding = false
+        }
+    }
+
+    func dismissSystemEQOnboarding() {
+        AppPreferences.hasCompletedSystemEQOnboarding = true
+        showSystemEQOnboarding = false
+    }
+
+    func setPreferSystemEQOnLaunch(_ enabled: Bool) {
+        preferSystemEQOnLaunch = enabled
+        AppPreferences.preferSystemEQOnLaunch = enabled
+    }
+
+    func setAutoApplyDeviceProfiles(_ enabled: Bool) {
+        autoApplyDeviceProfiles = enabled
+        AppPreferences.autoApplyDeviceProfiles = enabled
+    }
+
+    func setFeedbackProtectionEnabled(_ enabled: Bool) {
+        feedbackProtectionEnabled = enabled
+        systemAudioManager.setFeedbackProtectionEnabled(enabled)
+    }
+
+    func rememberPresetForCurrentDevice() {
+        guard let uid = activePhysicalOutputUID ?? systemAudioManager.activePhysicalOutputUID else {
+            errorMessage = "No active output device to bind a profile."
+            return
+        }
+        let name = activePhysicalOutputName
+            ?? systemAudioManager.activePhysicalOutputName
+            ?? "Output Device"
+        deviceProfileStore.upsert(
+            deviceUID: uid,
+            deviceName: name,
+            presetID: selectedPreset.id,
+            presetName: selectedPreset.name,
+            into: &deviceProfiles
+        )
+        safetyBannerMessage = "Saved “\(selectedPreset.name)” for \(name)."
+    }
+
+    func clearProfileForCurrentDevice() {
+        guard let uid = activePhysicalOutputUID ?? systemAudioManager.activePhysicalOutputUID else { return }
+        deviceProfileStore.remove(deviceUID: uid, from: &deviceProfiles)
+        safetyBannerMessage = "Removed device profile."
+    }
+
+    func clearFeedbackProtectionTrip() {
+        systemAudioManager.clearFeedbackProtectionTrip()
+        didTripFeedbackProtection = false
+        safetyBannerMessage = nil
+        errorMessage = nil
+        // Re-enable EQ after user acknowledges the trip.
+        if !isEnabled {
+            setEnabled(true)
+        }
+        syncSystemAudioState()
+    }
+
+    private func handlePhysicalOutputChanged(uid: String?, name: String?) {
+        activePhysicalOutputUID = uid
+        activePhysicalOutputName = name
+        syncSystemAudioState()
+        applyDeviceProfileIfNeeded(forUID: uid)
+    }
+
+    private func handleSafetyTrip() {
+        didTripFeedbackProtection = true
+        isEnabled = false
+        safetyBannerMessage = "Feedback protection muted output. Check routing, then resume."
+        errorMessage = safetyBannerMessage
+        syncSystemAudioState()
+    }
+
+    private func applyDeviceProfileIfNeeded(forUID uid: String?) {
+        guard autoApplyDeviceProfiles, !isApplyingDeviceProfile else { return }
+        guard let uid, let profile = deviceProfileStore.profile(forDeviceUID: uid, in: deviceProfiles) else {
+            return
+        }
+        guard let presetID = profile.presetID else { return }
+
+        let match = presets.first { $0.id == presetID }
+            ?? presets.first { $0.name == profile.presetName }
+        guard let preset = match else { return }
+        guard preset.id != selectedPreset.id else { return }
+
+        isApplyingDeviceProfile = true
+        applyPreset(preset)
+        isApplyingDeviceProfile = false
+        safetyBannerMessage = "Loaded “\(preset.name)” for \(profile.deviceName)."
     }
 
     func startExternalLoopbackMode() {
@@ -652,6 +803,9 @@ final class OpenEQViewModel {
         isExternalLoopbackBypassed = systemAudioManager.isExternalLoopbackBypassed
         isSystemAudioBypassed = systemAudioManager.isSystemAudioBypassed
         systemAudioLatency = systemAudioManager.systemAudioLatency
+        activePhysicalOutputUID = systemAudioManager.activePhysicalOutputUID
+        activePhysicalOutputName = systemAudioManager.activePhysicalOutputName
+        didTripFeedbackProtection = systemAudioManager.didTripFeedbackProtection
     }
 
     private func updateExternalLoopbackEQIfNeeded() {

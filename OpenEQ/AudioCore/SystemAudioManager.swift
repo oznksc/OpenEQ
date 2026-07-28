@@ -21,13 +21,22 @@ final class SystemAudioManager {
     private(set) var isExternalLoopbackBypassed = false
     private(set) var isSystemAudioBypassed = false
     private(set) var systemAudioLatency: TimeInterval?
+    private(set) var activePhysicalOutputUID: String?
+    private(set) var activePhysicalOutputName: String?
+    private(set) var didTripFeedbackProtection = false
+    /// True when system EQ should resume after wake / recovery.
+    private(set) var prefersSystemEQRunning = false
+
+    var onPhysicalOutputChanged: ((String?, String?) -> Void)?
+    var onSafetyTrip: (() -> Void)?
 
     private let deviceManager: AudioDeviceManager
     private let systemAudioEQEngine: SystemAudioEQEngine
     private let externalLoopbackEngine: ExternalLoopbackEngine
     private let logger = AppLogger(category: "SystemAudio")
-    private var lastPhysicalOutputID: AudioDevice.ID?
     private var rebuildWorkItem: DispatchWorkItem?
+    private var lastSystemEQPreset: EQPreset = .flatPreset()
+    private var loopbackFeedbackGuard = FeedbackGuard()
 
     convenience init() {
         self.init(
@@ -52,29 +61,28 @@ final class SystemAudioManager {
             self?.applyAnalysis(analysis)
         }
         self.systemAudioEQEngine.onStatusChanged = { [weak self] status in
-            self?.status = status
-            if case .running = status {
-                self?.systemAudioLatency = self?.systemAudioEQEngine.latencyEstimate
-            }
-            if case .stopped = status {
-                self?.systemAudioLatency = nil
-            }
-            if case .failed = status {
-                self?.systemAudioLatency = nil
-            }
-            if case .permissionRequired = status {
-                self?.systemAudioLatency = nil
-            }
+            self?.handleEngineStatus(status)
+        }
+        self.systemAudioEQEngine.onSafetyTrip = { [weak self] in
+            self?.handleSafetyTrip()
+        }
+        self.systemAudioEQEngine.onPhysicalOutputChanged = { [weak self] uid, name in
+            self?.activePhysicalOutputUID = uid
+            self?.activePhysicalOutputName = name
+            self?.onPhysicalOutputChanged?(uid, name)
         }
         self.externalLoopbackEngine.onAnalysis = { [weak self] analysis in
             self?.applyAnalysis(analysis)
+            self?.evaluateLoopbackFeedback(analysis)
         }
         refreshDevices()
+        startSleepWakeObservers()
     }
 
     func setMode(_ mode: SystemAudioMode) {
         stopActive()
         self.mode = mode
+        prefersSystemEQRunning = false
         updateStatusForCurrentMode()
         logger.info("System audio mode changed to \(mode.rawValue)")
     }
@@ -99,13 +107,14 @@ final class SystemAudioManager {
         case .disabled:
             status = .stopped
         case .systemEQ:
-            startSystemEQ(preset: .flatPreset())
+            startSystemEQ(preset: lastSystemEQPreset)
         case .externalLoopback:
-            startExternalLoopback(preset: .flatPreset())
+            startExternalLoopback(preset: lastSystemEQPreset)
         }
     }
 
     func stop() {
+        prefersSystemEQRunning = false
         stopActive()
         status = .stopped
     }
@@ -113,11 +122,14 @@ final class SystemAudioManager {
     /// Emergency stop: drop all system processing and restore routing immediately.
     func enterSafeMode() {
         logger.warning("Entering system audio safe mode")
+        prefersSystemEQRunning = false
         rebuildWorkItem?.cancel()
         stopActive()
         mode = .disabled
         isSystemAudioBypassed = false
         isExternalLoopbackBypassed = false
+        didTripFeedbackProtection = false
+        loopbackFeedbackGuard.reset()
         resetAnalysis()
         status = .stopped
     }
@@ -125,27 +137,41 @@ final class SystemAudioManager {
     func startSystemEQ(preset: EQPreset = .flatPreset()) {
         stopActive()
         mode = .systemEQ
+        lastSystemEQPreset = preset
+        prefersSystemEQRunning = true
         guard #available(macOS 14.2, *) else {
             status = .failed("System-wide EQ requires macOS 14.2 or later.")
+            prefersSystemEQRunning = false
             return
         }
 
+        systemAudioEQEngine.setFeedbackProtectionEnabled(AppPreferences.feedbackProtectionEnabled)
         systemAudioEQEngine.start(with: preset)
         systemAudioEQEngine.setBypassed(isSystemAudioBypassed)
         systemAudioLatency = systemAudioEQEngine.latencyEstimate
+        activePhysicalOutputUID = systemAudioEQEngine.physicalOutputUID
+        activePhysicalOutputName = systemAudioEQEngine.physicalOutputName
+        didTripFeedbackProtection = false
         status = systemAudioEQEngine.status
-        lastPhysicalOutputID = deviceManager.getDefaultOutputDevice()?.id
+        if status != .running {
+            prefersSystemEQRunning = false
+        }
     }
 
     func stopSystemEQ() {
+        prefersSystemEQRunning = false
         systemAudioEQEngine.stop()
         systemAudioLatency = nil
+        activePhysicalOutputUID = nil
+        activePhysicalOutputName = nil
+        didTripFeedbackProtection = false
         resetAnalysis()
         if mode == .systemEQ { status = .stopped }
     }
 
     func updateSystemAudioEQ(_ preset: EQPreset) {
         guard mode == .systemEQ else { return }
+        lastSystemEQPreset = preset
         systemAudioEQEngine.updateEQ(preset)
     }
 
@@ -155,11 +181,37 @@ final class SystemAudioManager {
         systemAudioEQEngine.setBypassed(bypassed)
     }
 
+    func clearFeedbackProtectionTrip() {
+        didTripFeedbackProtection = false
+        loopbackFeedbackGuard.reset()
+        systemAudioEQEngine.clearSafetyTripMute()
+        if mode == .systemEQ, status == .running {
+            // Resume processing after user acknowledges the trip.
+            systemAudioEQEngine.setBypassed(isSystemAudioBypassed)
+        }
+    }
+
+    func setFeedbackProtectionEnabled(_ enabled: Bool) {
+        AppPreferences.feedbackProtectionEnabled = enabled
+        systemAudioEQEngine.setFeedbackProtectionEnabled(enabled)
+        if !enabled {
+            clearFeedbackProtectionTrip()
+        }
+    }
+
     func startExternalLoopback(preset: EQPreset) {
         stopSystemEQ()
         mode = .externalLoopback
+        lastSystemEQPreset = preset
+        prefersSystemEQRunning = false
+        loopbackFeedbackGuard.reset()
         updateStatusForCurrentMode()
         guard status == .ready else { return }
+
+        // Prefer BlackHole as input when available and nothing valid selected.
+        if selectedInputDevice?.isBlackHole != true, let blackHole = detectedBlackHoleDevice {
+            selectedInputDevice = blackHole
+        }
 
         externalLoopbackEngine.start(
             inputDevice: selectedInputDevice,
@@ -175,11 +227,13 @@ final class SystemAudioManager {
     func stopExternalLoopback() {
         externalLoopbackEngine.stop()
         externalLoopbackLatency = nil
+        loopbackFeedbackGuard.reset()
         resetAnalysis()
         if mode == .externalLoopback { status = .stopped }
     }
 
     func restartExternalLoopback(preset: EQPreset) {
+        lastSystemEQPreset = preset
         externalLoopbackEngine.updateEQ(preset)
         externalLoopbackEngine.restart()
         externalLoopbackEngine.setBypassed(isExternalLoopbackBypassed)
@@ -189,6 +243,7 @@ final class SystemAudioManager {
 
     func updateExternalLoopbackEQ(_ preset: EQPreset) {
         guard mode == .externalLoopback else { return }
+        lastSystemEQPreset = preset
         externalLoopbackEngine.updateEQ(preset)
     }
 
@@ -222,6 +277,103 @@ final class SystemAudioManager {
     func getDefaultOutputDevice() -> AudioDevice? { deviceManager.getDefaultOutputDevice() }
     func detectBlackHoleDevice() -> AudioDevice? { deviceManager.detectBlackHoleDevice() }
 
+    // MARK: - Private
+
+    private func handleEngineStatus(_ status: SystemAudioStatus) {
+        self.status = status
+        switch status {
+        case .running:
+            systemAudioLatency = systemAudioEQEngine.latencyEstimate
+            activePhysicalOutputUID = systemAudioEQEngine.physicalOutputUID
+            activePhysicalOutputName = systemAudioEQEngine.physicalOutputName
+        case .stopped, .permissionRequired:
+            systemAudioLatency = nil
+        case .failed:
+            systemAudioLatency = nil
+            prefersSystemEQRunning = false
+        case .ready, .unavailable:
+            break
+        }
+    }
+
+    private func handleSafetyTrip() {
+        didTripFeedbackProtection = true
+        logger.warning("Feedback protection tripped — muting system EQ output")
+        // Immediate hearing safety: bypass EQ and keep mute until user clears.
+        isSystemAudioBypassed = true
+        systemAudioEQEngine.setBypassed(true)
+        onSafetyTrip?()
+    }
+
+    private func evaluateLoopbackFeedback(_ analysis: SpectrumAnalysis) {
+        guard mode == .externalLoopback, status == .running else { return }
+        guard AppPreferences.feedbackProtectionEnabled else { return }
+
+        // Approximate RMS from peak for loopback path (analyzer exposes peaks).
+        let rms = max(analysis.leftPeak, analysis.rightPeak) * 0.7
+        if loopbackFeedbackGuard.evaluate(peak: analysis.peakLevel, rms: rms) {
+            didTripFeedbackProtection = true
+            logger.warning("Feedback protection tripped on external loopback")
+            externalLoopbackEngine.setBypassed(true)
+            isExternalLoopbackBypassed = true
+            onSafetyTrip?()
+        }
+    }
+
+    private func startSleepWakeObservers() {
+        let center = NSWorkspace.shared.notificationCenter
+
+        // Observers live for the process lifetime (manager is owned by the app ViewModel).
+        center.addObserver(
+            forName: NSWorkspace.willSleepNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.handleWillSleep()
+            }
+        }
+
+        center.addObserver(
+            forName: NSWorkspace.didWakeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.handleDidWake()
+            }
+        }
+    }
+
+    private func handleWillSleep() {
+        guard mode == .systemEQ, status == .running else { return }
+        logger.info("System sleep detected — pausing aggregate IO safely")
+        // Keep prefersSystemEQRunning true so wake can resume.
+        systemAudioEQEngine.stop()
+        systemAudioLatency = nil
+        status = .stopped
+    }
+
+    private func handleDidWake() {
+        guard prefersSystemEQRunning, mode == .systemEQ else { return }
+        logger.info("System wake detected — recovering system EQ")
+        // Brief delay lets Core Audio re-enumerate devices after wake.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+            guard let self, self.prefersSystemEQRunning, self.mode == .systemEQ else { return }
+            self.refreshDevices()
+            self.systemAudioEQEngine.setFeedbackProtectionEnabled(AppPreferences.feedbackProtectionEnabled)
+            self.systemAudioEQEngine.start(with: self.lastSystemEQPreset)
+            self.systemAudioEQEngine.setBypassed(self.isSystemAudioBypassed)
+            self.systemAudioLatency = self.systemAudioEQEngine.latencyEstimate
+            self.activePhysicalOutputUID = self.systemAudioEQEngine.physicalOutputUID
+            self.activePhysicalOutputName = self.systemAudioEQEngine.physicalOutputName
+            self.status = self.systemAudioEQEngine.status
+            if self.status != .running {
+                self.prefersSystemEQRunning = false
+            }
+        }
+    }
+
     private func syncDeviceSnapshot() {
         let inputs = deviceManager.getInputDevices()
         let outputs = deviceManager.getOutputDevices()
@@ -230,13 +382,14 @@ final class SystemAudioManager {
         detectedBlackHoleDevice = deviceManager.detectBlackHoleDevice()
 
         selectedInputDevice = selectedInputDevice.flatMap { cur in inputs.first { $0.id == cur.id } }
-            ?? inputs.first(where: \.isDefaultInput) ?? inputs.first
+            ?? detectedBlackHoleDevice
+            ?? inputs.first(where: \.isDefaultInput)
+            ?? inputs.first
         selectedOutputDevice = selectedOutputDevice.flatMap { cur in outputs.first { $0.id == cur.id } }
-            ?? outputs.first(where: \.isDefaultOutput) ?? outputs.first
+            ?? outputs.first(where: \.isDefaultOutput)
+            ?? outputs.first
 
-        // Device list churn (Bluetooth hops) can fire often. Debounce rebuilds and
-        // let SystemAudioEQEngine decide whether the physical output actually changed.
-        if mode == .systemEQ, status == .running {
+        if mode == .systemEQ, status == .running || prefersSystemEQRunning {
             scheduleRebuild()
         }
 
@@ -249,6 +402,8 @@ final class SystemAudioManager {
             guard let self else { return }
             self.systemAudioEQEngine.rebuildAggregateWithCurrentOutput()
             self.systemAudioLatency = self.systemAudioEQEngine.latencyEstimate
+            self.activePhysicalOutputUID = self.systemAudioEQEngine.physicalOutputUID
+            self.activePhysicalOutputName = self.systemAudioEQEngine.physicalOutputName
             self.status = self.systemAudioEQEngine.status
         }
         rebuildWorkItem = work
@@ -304,7 +459,11 @@ final class SystemAudioManager {
                 status = .failed("Input and output cannot match")
                 return
             }
-            status = .ready
+            if externalLoopbackEngine.status == .running {
+                status = .running
+            } else {
+                status = .ready
+            }
         }
     }
 

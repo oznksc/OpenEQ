@@ -19,6 +19,9 @@ MVVM with `@Observable`:
 - `SystemAudioEQEngine` — tap + aggregate + biquad DSP (track **physical** output, never rebuild using our own aggregate as destination)
 - `ExternalLoopbackEngine` — BlackHole loopback
 - `PeakLimiterConfigurator` — shared Apple peak-limiter defaults
+- `FeedbackGuard` — sustained hot-signal mute for howling protection
+- `DeviceProfileStore` — per-device UID → preset map
+- Do **not** claim a shipped virtual HAL/DriverKit device; CATap is the primary system path (see `docs/virtual-driver.md`)
 
 ## Audio Formats
 

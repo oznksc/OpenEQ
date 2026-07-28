@@ -16,9 +16,10 @@ gantt
     Bug Fixes and DSP Stability          :done, p1_1, 2026-07, 1M
     XCTest Unit & Performance Tests      :done, p1_2, 2026-07, 1M
     section Phase 2: System Audio Routing
-    Driverless Loopback Mode Dev         :active, p2_1, 2026-08, 2M
-    Core Audio HAL/DriverKit Research    :p2_2, 2026-09, 2M
-    Feedback Loop Protection Algorithm   :p2_3, 2026-10, 1M
+    One-click driverless System EQ       :done, p2_1, 2026-07, 1M
+    Feedback Loop Protection Algorithm   :done, p2_2, 2026-07, 1M
+    Device profiles + sleep/wake         :done, p2_3, 2026-07, 1M
+    Core Audio HAL/DriverKit (deferred)  :p2_4, 2026-10, 2M
     section Phase 3: Advanced DSP & Parametric EQ
     Interactive Node Dragging UI         :p3_1, 2026-12, 2M
     Dynamic Range Compressor & Limiter   :p3_2, 2027-01, 2M
@@ -55,9 +56,10 @@ gantt
 
 ---
 
-## 🌐 PHASE 2: Advanced System Audio & Virtual Driver Routing (Q4 2026 - Q1 2027)
+## ✅ PHASE 2: Advanced System Audio & Routing Safety (core complete)
 
-**Focus:** Building a robust, low-latency system-wide EQ routing engine on macOS without causing feedback loops.
+**Focus:** One-click driverless system EQ, feedback protection, device profiles, sleep/wake recovery.  
+**Deferred:** Bundled HAL/DriverKit virtual device — see `docs/virtual-driver.md` (CATap is the shipped path).
 
 ```
 +------------------+      +-------------------------+      +-------------------------+
@@ -73,16 +75,25 @@ gantt
                                                            +-------------------------+
 ```
 
-### 2.1. Apple Audio DriverKit (Core Audio HAL Plug-in) Integration
-*   **User-Friendly Installation:** Bundle a proprietary Core Audio HAL plug-in (or DriverKit Audio driver) that installs with a single click, removing the need for users to manually configure third-party loopback software like BlackHole.
-*   **Automatic Routing:** A background service (`SystemAudioManager`) that redirects the system output to the virtual driver upon app launch and restores the original output device on quit.
+### 2.1. Driverless System EQ (shipped)
+*   **One-click Start System EQ** in the main header, menu bar, and System Audio sheet.
+*   Onboarding for first-run permission education.
+*   Optional “start System EQ on launch”.
+*   Primary path is Core Audio process tap + aggregate (no BlackHole).
 
-### 2.2. Dynamic Device Routing
-*   **Headphone/Speaker Transits:** Seamless aggregate device reconfiguration when headphones are plugged in or disconnected (AirPods, Wired Headphones, HDMI outputs).
-*   **Device-Specific Profiles:** Auto-loading specific user EQ presets depending on the active output accessory (e.g., distinct curves for AirPods Pro vs. internal Mac speakers).
+### 2.2. Dynamic Device Routing (shipped)
+*   Headphone/speaker/AirPods transitions rebuild the aggregate against the **physical** device only.
+*   **Device-specific profiles:** remember preset per Core Audio device UID; auto-apply on connect.
 
-### 2.3. Safety & Feedback Protection
-*   **Feedback Loop Detector:** An intelligent safety system that identifies feedback loops (e.g., routing input/microphone streams back into the source) and mutes the DSP engine within milliseconds to prevent hearing damage.
+### 2.3. Safety & Feedback Protection (shipped)
+*   `FeedbackGuard` trips on sustained near-clip + high RMS; mutes output immediately.
+*   User must acknowledge (“Resume after check”) before audio returns.
+*   Sleep/wake: pause cleanly on sleep, recover System EQ after wake when left enabled.
+*   Emergency safe mode restores default output.
+
+### 2.4. HAL / DriverKit (deferred)
+*   Research captured in `docs/virtual-driver.md`.
+*   Not shipped as a fake installer — would require signed plug-in, installer, and notarization.
 
 ---
 

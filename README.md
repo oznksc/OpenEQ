@@ -22,18 +22,18 @@ OpenEQ is a lightweight desktop EQ for:
 - Built-in presets + custom save/import/export (JSON)
 - Menu bar: bypass, volume, recent presets, playback controls
 
-### System audio (experimental)
+### System audio (driverless, experimental-hardened)
 Requires **macOS 14.2+** and **Screen & System Audio Recording** permission.
 
 | Mode | What it does | Notes |
 |------|----------------|-------|
-| **System-Wide EQ** | Core Audio process tap → biquad EQ + limiter → private aggregate device | No BlackHole install; still edge-case sensitive (device hops, permission) |
-| **External Loopback** | Process a virtual input (e.g. BlackHole) through OpenEQ | Explicit routing; advanced users |
+| **System-Wide EQ** | One-click process tap → biquad EQ + limiter → private aggregate | **No driver install**; primary path |
+| **External Loopback** | Process a virtual input (e.g. BlackHole) through OpenEQ | Advanced fallback |
 | **Disabled** | Local files only | Default |
 
-**Not claimed yet:** zero-latency virtual driver, install-free perfect system routing on every hardware setup, or multi-channel Atmos calibration.
+**Phase 2 safety:** feedback/howling mute, sleep/wake recovery, per-device EQ profiles, emergency safe mode, permission recovery.
 
-Safety nets: unified bypass, emergency stop / safe mode (restores default output), latency readout, permission recovery to System Settings.
+**Not claimed:** bundled HAL/DriverKit virtual device (researched, deferred — [docs/virtual-driver.md](docs/virtual-driver.md)), zero-latency on all hardware, multi-channel Atmos calibration.
 
 Details: [docs/system-audio.md](docs/system-audio.md).
 

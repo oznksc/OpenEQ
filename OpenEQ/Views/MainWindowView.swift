@@ -86,13 +86,28 @@ struct MainWindowView: View {
             Spacer()
 
             Button {
+                viewModel.toggleSystemEQOneClick()
+            } label: {
+                Label(
+                    viewModel.isSystemEQActive ? "System EQ On" : "System EQ",
+                    systemImage: viewModel.isSystemEQActive ? "waveform.circle.fill" : "waveform.circle"
+                )
+                .font(.system(size: 11, weight: .medium))
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(viewModel.isSystemEQActive ? .green : .accentColor)
+            .controlSize(.small)
+            .help(viewModel.isSystemEQActive ? "Stop system-wide EQ" : "Start system-wide EQ (one click)")
+
+            Button {
                 viewModel.isShowingSystemAudio = true
             } label: {
-                Label("System Audio", systemImage: "speaker.wave.2")
+                Image(systemName: "gearshape")
                     .font(.system(size: 11, weight: .medium))
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
+            .help("System audio settings")
 
             if !viewModel.isEnabled {
                 Text("BYPASSED")

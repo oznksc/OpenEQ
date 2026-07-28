@@ -7,9 +7,16 @@ let kOpenEQSysObj = AudioObjectID(kAudioObjectSystemObject)
 final class SystemAudioEQEngine {
     private(set) var status: SystemAudioStatus = .stopped
     private(set) var latencyEstimate: TimeInterval?
+    private(set) var physicalOutputUID: String?
+    private(set) var physicalOutputName: String?
+    private(set) var didTripFeedbackProtection = false
 
     var onAnalysis: ((SpectrumAnalysis) -> Void)?
     var onStatusChanged: ((SystemAudioStatus) -> Void)?
+    /// Fired once when feedback protection mutes output to prevent hearing damage.
+    var onSafetyTrip: (() -> Void)?
+    /// Fired after a successful rebuild onto a new physical device.
+    var onPhysicalOutputChanged: ((String?, String?) -> Void)?
 
     private let analyzer = SpectrumAnalyzer()
     private let logger = AppLogger(category: "SystemAudioEQ")
@@ -23,6 +30,9 @@ final class SystemAudioEQEngine {
     private var isRebuilding = false
     private var sampleRate: Double = 48000
     private let dspState = SystemAudioDSPState()
+    private var feedbackGuard = FeedbackGuard()
+    private var safetyTripNotified = false
+    private var feedbackProtectionEnabled = true
     private var isObservingDefaultOutput = false
     private lazy var defaultOutputListener: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
         self?.handleDefaultOutputChanged()
@@ -41,9 +51,14 @@ final class SystemAudioEQEngine {
         stop()
         do {
             physicalOutputID = try getDefaultOutputDeviceID()
+            refreshPhysicalOutputMetadata()
             try setupTap()
             ioQueue.sync {
                 dspState.configure(preset, sampleRate: sampleRate)
+                feedbackGuard.reset()
+                safetyTripNotified = false
+                didTripFeedbackProtection = false
+                dspState.isEmergencyMuted = false
             }
             try setupAggregateWithOutput()
             try setDefaultOutput(aggDeviceID)
@@ -66,10 +81,15 @@ final class SystemAudioEQEngine {
         cleanup(restoreOutput: true)
         ioQueue.sync {
             dspState.reset()
+            feedbackGuard.reset()
+            safetyTripNotified = false
         }
         isRunning = false
         isRebuilding = false
         latencyEstimate = nil
+        physicalOutputUID = nil
+        physicalOutputName = nil
+        didTripFeedbackProtection = false
         publishStatus(.stopped)
         logger.info("System-wide EQ stopped")
     }
@@ -85,6 +105,28 @@ final class SystemAudioEQEngine {
         ioQueue.async { [weak self] in
             self?.dspState.isBypassed = bypassed
         }
+    }
+
+    func setFeedbackProtectionEnabled(_ enabled: Bool) {
+        feedbackProtectionEnabled = enabled
+        if !enabled {
+            ioQueue.async { [weak self] in
+                self?.feedbackGuard.reset()
+                self?.dspState.isEmergencyMuted = false
+                self?.safetyTripNotified = false
+            }
+            didTripFeedbackProtection = false
+        }
+    }
+
+    func clearSafetyTripMute() {
+        ioQueue.async { [weak self] in
+            guard let self else { return }
+            self.feedbackGuard.reset()
+            self.dspState.isEmergencyMuted = false
+            self.safetyTripNotified = false
+        }
+        didTripFeedbackProtection = false
     }
 
     /// Rebuild when the user switches physical output (headphones, AirPods, etc.).
@@ -124,12 +166,14 @@ final class SystemAudioEQEngine {
 
         do {
             physicalOutputID = currentDefault
+            refreshPhysicalOutputMetadata()
             try setupAggregateWithOutput()
             try setDefaultOutput(aggDeviceID)
             try startAggIO()
             latencyEstimate = estimateLatency()
             isRebuilding = false
             publishStatus(.running)
+            onPhysicalOutputChanged?(physicalOutputUID, physicalOutputName)
             logger.info("Aggregate device rebuilt with new output")
         } catch {
             isRebuilding = false
@@ -240,6 +284,7 @@ final class SystemAudioEQEngine {
         }
 
         let activeChannels = min(inBuffers.count, outBuffers.count, channelCount)
+        var primaryFrames = 0
         for channel in 0..<activeChannels {
             guard let inputData = inBuffers[channel].mData,
                   let outputData = outBuffers[channel].mData else { continue }
@@ -251,6 +296,36 @@ final class SystemAudioEQEngine {
             let destination = outputData.assumingMemoryBound(to: Float.self)
             memcpy(destination, source, Int(copyBytes))
             dspState.process(destination, frames: frames, channel: channel)
+            if channel == 0 {
+                primaryFrames = frames
+            }
+        }
+
+        if feedbackProtectionEnabled,
+           !dspState.isEmergencyMuted,
+           primaryFrames > 0,
+           let firstOut = outBuffers.first?.mData {
+            let samples = firstOut.assumingMemoryBound(to: Float.self)
+            if feedbackGuard.evaluate(samples: samples, frames: primaryFrames) {
+                dspState.isEmergencyMuted = true
+                // Zero all channels immediately.
+                for buffer in outBuffers {
+                    guard let data = buffer.mData, buffer.mDataByteSize > 0 else { continue }
+                    memset(data, 0, Int(buffer.mDataByteSize))
+                }
+                if !safetyTripNotified {
+                    safetyTripNotified = true
+                    DispatchQueue.main.async { [weak self] in
+                        self?.didTripFeedbackProtection = true
+                        self?.onSafetyTrip?()
+                    }
+                }
+            }
+        } else if dspState.isEmergencyMuted {
+            for buffer in outBuffers {
+                guard let data = buffer.mData, buffer.mDataByteSize > 0 else { continue }
+                memset(data, 0, Int(buffer.mDataByteSize))
+            }
         }
 
         // Analyze post-EQ output so spectrum matches what the user hears.
@@ -317,6 +392,31 @@ final class SystemAudioEQEngine {
     private func estimateLatency() -> TimeInterval {
         // Tap buffer + aggregate IO + small safety margin.
         Double(1024) / max(sampleRate, 1) * 3
+    }
+
+    private func refreshPhysicalOutputMetadata() {
+        physicalOutputUID = try? getDeviceUID(physicalOutputID)
+        physicalOutputName = try? getDeviceName(physicalOutputID)
+    }
+
+    private func getDeviceName(_ deviceID: AudioDeviceID) throws -> String {
+        var addr = AudioObjectPropertyAddress(
+            mSelector: kAudioObjectPropertyName,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        let ptr = UnsafeMutablePointer<CFString?>.allocate(capacity: 1)
+        ptr.initialize(to: nil)
+        defer {
+            ptr.deinitialize(count: 1)
+            ptr.deallocate()
+        }
+        var size = UInt32(MemoryLayout<CFString?>.size)
+        let err = AudioObjectGetPropertyData(deviceID, &addr, UInt32(0), nil, &size, ptr)
+        guard err == noErr, let name = ptr.pointee as String? else {
+            throw SystemAudioEQError.failed("Get device name: \(err)")
+        }
+        return name
     }
 
     private func publishStatus(_ newStatus: SystemAudioStatus) {
@@ -595,6 +695,7 @@ private final class SystemAudioDSPState {
     private var leftLimiterGain: Float = 1
     private var rightLimiterGain: Float = 1
     var isBypassed = false
+    var isEmergencyMuted = false
 
     func configure(_ preset: EQPreset, sampleRate: Double) {
         targetPreampLinear = pow(10, preset.preamp / 20)
@@ -620,6 +721,7 @@ private final class SystemAudioDSPState {
         leftLimiterGain = 1
         rightLimiterGain = 1
         isBypassed = false
+        isEmergencyMuted = false
         smoothingCoeffs = Array(repeating: SmoothingCoefficients(), count: 31)
         currentInterpolated = Array(repeating: .identity, count: 31)
         leftStates = Array(repeating: BiquadState(), count: 31)
@@ -627,6 +729,10 @@ private final class SystemAudioDSPState {
     }
 
     func process(_ samples: UnsafeMutablePointer<Float>, frames: Int, channel: Int) {
+        if isEmergencyMuted {
+            memset(samples, 0, frames * MemoryLayout<Float>.size)
+            return
+        }
         guard !isBypassed else { return }
 
         // Smooth preamp so large fader jumps don't click.

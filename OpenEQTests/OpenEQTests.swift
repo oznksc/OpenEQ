@@ -409,4 +409,107 @@ final class OpenEQTests: XCTestCase {
         PeakLimiterConfigurator.applyDefaults(to: limiter)
         XCTAssertFalse(limiter.bypass)
     }
+
+    // MARK: - Phase 2
+
+    func testFeedbackGuardDoesNotTripOnShortPeaks() {
+        var guardState = FeedbackGuard()
+        for _ in 0..<5 {
+            XCTAssertFalse(guardState.evaluate(peak: 1.0, rms: 0.9))
+        }
+        XCTAssertFalse(guardState.isTripped)
+    }
+
+    func testFeedbackGuardTripsOnSustainedHotSignal() {
+        var guardState = FeedbackGuard()
+        var tripped = false
+        for _ in 0..<(FeedbackGuard.tripWindowCount + 2) {
+            if guardState.evaluate(peak: 0.99, rms: 0.5) {
+                tripped = true
+                break
+            }
+        }
+        XCTAssertTrue(tripped)
+        XCTAssertTrue(guardState.isTripped)
+        // Remains tripped until reset.
+        XCTAssertTrue(guardState.evaluate(peak: 0.1, rms: 0.05))
+        guardState.reset()
+        XCTAssertFalse(guardState.isTripped)
+        XCTAssertFalse(guardState.evaluate(peak: 0.1, rms: 0.05))
+    }
+
+    func testFeedbackGuardCoolsDown() {
+        var guardState = FeedbackGuard()
+        for _ in 0..<10 {
+            _ = guardState.evaluate(peak: 0.99, rms: 0.5)
+        }
+        XCTAssertGreaterThan(guardState.hotWindows, 0)
+        for _ in 0..<20 {
+            _ = guardState.evaluate(peak: 0.2, rms: 0.05)
+        }
+        XCTAssertEqual(guardState.hotWindows, 0)
+        XCTAssertFalse(guardState.isTripped)
+    }
+
+    func testDeviceProfileStoreUpsertAndLookup() {
+        let store = DeviceProfileStore()
+        var profiles: [DeviceEQProfile] = []
+        let presetID = UUID()
+
+        store.upsert(
+            deviceUID: "test-uid-airpods",
+            deviceName: "AirPods Pro",
+            presetID: presetID,
+            presetName: "Bass Boost",
+            into: &profiles
+        )
+
+        XCTAssertEqual(profiles.count, 1)
+        let found = store.profile(forDeviceUID: "test-uid-airpods", in: profiles)
+        XCTAssertEqual(found?.presetName, "Bass Boost")
+        XCTAssertEqual(found?.presetID, presetID)
+
+        store.upsert(
+            deviceUID: "test-uid-airpods",
+            deviceName: "AirPods Pro",
+            presetID: presetID,
+            presetName: "Vocal Clarity",
+            into: &profiles
+        )
+        XCTAssertEqual(profiles.count, 1)
+        XCTAssertEqual(profiles[0].presetName, "Vocal Clarity")
+
+        store.remove(deviceUID: "test-uid-airpods", from: &profiles)
+        XCTAssertTrue(profiles.isEmpty)
+    }
+
+    func testAudioDeviceProfileKeyPrefersUID() {
+        let withUID = AudioDevice(
+            id: 1,
+            uid: "BuiltInSpeakerDevice",
+            name: "MacBook Speakers",
+            manufacturer: "Apple",
+            isInput: false,
+            isOutput: true,
+            isDefaultInput: false,
+            isDefaultOutput: true,
+            sampleRate: 48000,
+            channelCount: 2
+        )
+        XCTAssertEqual(withUID.profileKey, "BuiltInSpeakerDevice")
+
+        let withoutUID = AudioDevice(
+            id: 42,
+            uid: nil,
+            name: "Unknown",
+            manufacturer: nil,
+            isInput: false,
+            isOutput: true,
+            isDefaultInput: false,
+            isDefaultOutput: false,
+            sampleRate: nil,
+            channelCount: 2
+        )
+        XCTAssertEqual(withoutUID.profileKey, "id:42")
+    }
 }

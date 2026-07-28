@@ -114,6 +114,7 @@ final class AudioDeviceManager {
 
             return AudioDevice(
                 id: deviceID,
+                uid: try stringProperty(deviceID, selector: kAudioDevicePropertyDeviceUID),
                 name: try stringProperty(deviceID, selector: kAudioObjectPropertyName) ?? "Unknown Device",
                 manufacturer: try stringProperty(deviceID, selector: kAudioObjectPropertyManufacturer),
                 isInput: isInput,
