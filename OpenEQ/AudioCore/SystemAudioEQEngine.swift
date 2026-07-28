@@ -298,6 +298,64 @@ private struct BiquadCoefficients {
     }
 }
 
+private struct SmoothingCoefficients {
+    static let duration = 512
+
+    private var current: BiquadCoefficients
+    private var target: BiquadCoefficients
+    private var remaining: Int
+
+    init() {
+        current = .identity
+        target = .identity
+        remaining = 0
+    }
+
+    mutating func startTransition(to newTarget: BiquadCoefficients) {
+        if remaining > 0 {
+            let t = 1 - Float(remaining) / Float(Self.duration)
+            current = lerp(current, target, t)
+        }
+        target = newTarget
+        remaining = Self.duration
+    }
+
+    func interpolatedCoeffs() -> BiquadCoefficients {
+        guard remaining > 0 else { return current }
+        let t = 1 - Float(remaining) / Float(Self.duration)
+        return lerp(current, target, t)
+    }
+
+    mutating func advance(frames: Int) {
+        guard remaining > 0 else { return }
+
+        if frames >= remaining {
+            current = target
+            remaining = 0
+        } else {
+            let t = 1 - Float(remaining - frames) / Float(Self.duration)
+            current = lerp(current, target, t)
+            remaining -= frames
+        }
+    }
+
+    mutating func reset() {
+        current = .identity
+        target = .identity
+        remaining = 0
+    }
+
+    private func lerp(_ a: BiquadCoefficients, _ b: BiquadCoefficients, _ t: Float) -> BiquadCoefficients {
+        BiquadCoefficients(
+            b0: a.b0 + (b.b0 - a.b0) * t,
+            b1: a.b1 + (b.b1 - a.b1) * t,
+            b2: a.b2 + (b.b2 - a.b2) * t,
+            a1: a.a1 + (b.a1 - a.a1) * t,
+            a2: a.a2 + (b.a2 - a.a2) * t
+        )
+    }
+}
+
 private struct BiquadState {
     var x1: Float = 0
     var x2: Float = 0
@@ -306,7 +364,7 @@ private struct BiquadState {
 }
 
 private final class SystemAudioDSPState {
-    private(set) var coefficients = Array(repeating: BiquadCoefficients.identity, count: 31)
+    private var smoothingCoeffs = Array(repeating: SmoothingCoefficients(), count: 31)
     private var leftStates = Array(repeating: BiquadState(), count: 31)
     private var rightStates = Array(repeating: BiquadState(), count: 31)
     private var preampLinear: Float = 1
@@ -315,22 +373,25 @@ private final class SystemAudioDSPState {
     func configure(_ preset: EQPreset, sampleRate: Double) {
         preampLinear = pow(10, preset.preamp / 20)
 
-        for index in coefficients.indices {
+        for index in smoothingCoeffs.indices {
             guard index < preset.bands.count else {
-                coefficients[index] = .identity
+                smoothingCoeffs[index].startTransition(to: .identity)
                 continue
             }
 
-            coefficients[index] = Self.makeCoefficients(
-                for: preset.bands[index],
-                sampleRate: Float(sampleRate)
+            smoothingCoeffs[index].startTransition(
+                to: Self.makeCoefficients(
+                    for: preset.bands[index],
+                    sampleRate: Float(sampleRate)
+                )
             )
         }
     }
 
     func reset() {
         preampLinear = 1
-        coefficients = Array(repeating: .identity, count: 31)
+        smoothingCoeffs = Array(repeating: SmoothingCoefficients(), count: 31)
+        currentInterpolated = Array(repeating: .identity, count: 31)
         leftStates = Array(repeating: BiquadState(), count: 31)
         rightStates = Array(repeating: BiquadState(), count: 31)
     }
@@ -343,6 +404,14 @@ private final class SystemAudioDSPState {
             vDSP_vsmul(samples, 1, &gain, samples, 1, vDSP_Length(frames))
         }
 
+        // Build interpolated coefficients for this buffer once (channel 0 also advances smoothing)
+        if channel == 0 {
+            currentInterpolated = smoothingCoeffs.indices.map { smoothingCoeffs[$0].interpolatedCoeffs() }
+            for i in smoothingCoeffs.indices {
+                smoothingCoeffs[i].advance(frames: frames)
+            }
+        }
+
         if channel == 0 {
             processFilters(samples, frames: frames, states: &leftStates)
         } else {
@@ -350,29 +419,31 @@ private final class SystemAudioDSPState {
         }
     }
 
+    private var currentInterpolated: [BiquadCoefficients] = []
+
     private func processFilters(
         _ samples: UnsafeMutablePointer<Float>,
         frames: Int,
         states: inout [BiquadState]
     ) {
-        for band in coefficients.indices {
-            let coefficient = coefficients[band]
-            if coefficient.b0 == 1,
-               coefficient.b1 == 0,
-               coefficient.b2 == 0,
-               coefficient.a1 == 0,
-               coefficient.a2 == 0 {
+        for band in currentInterpolated.indices {
+            let coeff = currentInterpolated[band]
+            if coeff.b0 == 1,
+               coeff.b1 == 0,
+               coeff.b2 == 0,
+               coeff.a1 == 0,
+               coeff.a2 == 0 {
                 continue
             }
 
             var state = states[band]
             for index in 0..<frames {
                 let input = samples[index]
-                let output = coefficient.b0 * input
-                    + coefficient.b1 * state.x1
-                    + coefficient.b2 * state.x2
-                    - coefficient.a1 * state.y1
-                    - coefficient.a2 * state.y2
+                let output = coeff.b0 * input
+                    + coeff.b1 * state.x1
+                    + coeff.b2 * state.x2
+                    - coeff.a1 * state.y1
+                    - coeff.a2 * state.y2
                 samples[index] = output
                 state.x2 = state.x1
                 state.x1 = input

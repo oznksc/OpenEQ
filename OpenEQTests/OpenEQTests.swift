@@ -1,14 +1,21 @@
 import XCTest
+import AVFoundation
 @testable import OpenEQ
 
 @MainActor
 final class OpenEQTests: XCTestCase {
-    func testEQBandClampsEditableParameters() {
-        var band = EQBand(frequency: 1, gain: 30, q: 20)
+    // MARK: - EQBand
+
+    func testEQBandClampsInitialParameters() {
+        let band = EQBand(frequency: 1, gain: 30, q: 20)
 
         XCTAssertEqual(band.frequency, EQBand.frequencyRange.lowerBound)
         XCTAssertEqual(band.gain, EQBand.gainRange.upperBound)
         XCTAssertEqual(band.q, EQBand.qRange.upperBound)
+    }
+
+    func testEQBandClampsUpdatedParameters() {
+        var band = EQBand(frequency: 1000)
 
         band.frequency = 100_000
         band.gain = -100
@@ -18,6 +25,66 @@ final class OpenEQTests: XCTestCase {
         XCTAssertEqual(band.gain, EQBand.gainRange.lowerBound)
         XCTAssertEqual(band.q, EQBand.qRange.lowerBound)
     }
+
+    func testEQBandClampsBoundaryValues() {
+        var band = EQBand(frequency: 1000)
+
+        band.frequency = 20
+        band.gain = -24
+        band.q = 0.1
+        XCTAssertEqual(band.frequency, 20)
+        XCTAssertEqual(band.gain, -24)
+        XCTAssertEqual(band.q, 0.1, accuracy: 0.001)
+
+        band.frequency = 20000
+        band.gain = 24
+        band.q = 10
+        XCTAssertEqual(band.frequency, 20000)
+        XCTAssertEqual(band.gain, 24)
+        XCTAssertEqual(band.q, 10, accuracy: 0.001)
+    }
+
+    func testEQBandFrequencyLabel() {
+        XCTAssertEqual(EQBand(frequency: 32).label, "32")
+        XCTAssertEqual(EQBand(frequency: 1000).label, "1k")
+        XCTAssertEqual(EQBand(frequency: 16000).label, "16k")
+        XCTAssertEqual(EQBand(frequency: 63).label, "63")
+        XCTAssertEqual(EQBand(frequency: 20000).label, "20k")
+    }
+
+    func testEQBandDefaultBandsCount() {
+        XCTAssertEqual(EQBand.defaultBands(count: .ten).count, 10)
+        XCTAssertEqual(EQBand.defaultBands(count: .thirtyOne).count, 31)
+    }
+
+    func testEQBandDefaultParametricBands() {
+        let bands = EQBand.defaultParametricBands()
+        XCTAssertEqual(bands.count, 5)
+        XCTAssertEqual(bands[0].filterType, .lowShelf)
+        XCTAssertEqual(bands[4].filterType, .highShelf)
+        XCTAssertEqual(bands[1].filterType, .parametric)
+    }
+
+    func testEQBandDefaultFrequenciesAreISOCorrect() {
+        let tenBand = EQBand.tenBandFrequencies
+        XCTAssertEqual(tenBand, [32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000])
+
+        let thirtyOneBand = EQBand.thirtyOneBandFrequencies
+        XCTAssertEqual(thirtyOneBand.count, 31)
+        XCTAssertEqual(thirtyOneBand.first, 20)
+        XCTAssertEqual(thirtyOneBand.last, 20000)
+    }
+
+    func testEQBandDefaultBandsForMode() {
+        let graphic = EQBand.defaultBands(for: .graphic, graphicBandCount: .ten)
+        XCTAssertEqual(graphic.count, 10)
+        XCTAssertTrue(graphic.allSatisfy { $0.filterType == .parametric })
+
+        let parametric = EQBand.defaultBands(for: .parametric)
+        XCTAssertEqual(parametric.count, 5)
+    }
+
+    // MARK: - EQPreset
 
     func testDefaultPresetsHaveExpectedShape() throws {
         let presets = EQPreset.defaultPresets()
@@ -29,6 +96,97 @@ final class OpenEQTests: XCTestCase {
         XCTAssertEqual(bassBoost.bands[1].gain, 5.5)
     }
 
+    func testFlatPresetIsNeutral() {
+        let flat = EQPreset.flatPreset()
+        XCTAssertEqual(flat.name, "Flat")
+        XCTAssertEqual(flat.mode, .graphic)
+        XCTAssertEqual(flat.preamp, 0)
+        XCTAssertTrue(flat.bands.allSatisfy { $0.gain == 0 })
+        XCTAssertTrue(flat.bands.allSatisfy { $0.isEnabled })
+    }
+
+    func testAllDefaultPresetsHaveValidGains() {
+        for preset in EQPreset.defaultPresets() {
+            for band in preset.bands {
+                XCTAssertTrue(
+                    band.gain >= EQBand.gainRange.lowerBound && band.gain <= EQBand.gainRange.upperBound,
+                    "\(preset.name) band at \(band.frequency)Hz has out-of-range gain \(band.gain)"
+                )
+            }
+        }
+    }
+
+    func testPresetJSONRoundTrip() throws {
+        let original = EQPreset(name: "Test", bands: EQBand.defaultBands(count: .thirtyOne), preamp: -3.0)
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        let data = try encoder.encode(original)
+
+        let decoder = JSONDecoder()
+        let decoded = try decoder.decode(EQPreset.self, from: data)
+
+        XCTAssertEqual(original.name, decoded.name)
+        XCTAssertEqual(original.mode, decoded.mode)
+        XCTAssertEqual(original.preamp, decoded.preamp, accuracy: 0.001)
+        XCTAssertEqual(original.bands.count, decoded.bands.count)
+        for (originalBand, decodedBand) in zip(original.bands, decoded.bands) {
+            XCTAssertEqual(originalBand.frequency, decodedBand.frequency)
+            XCTAssertEqual(originalBand.gain, decodedBand.gain)
+            XCTAssertEqual(originalBand.q, decodedBand.q, accuracy: 0.001)
+            XCTAssertEqual(originalBand.filterType, decodedBand.filterType)
+            XCTAssertEqual(originalBand.isEnabled, decodedBand.isEnabled)
+        }
+    }
+
+    func testPresetJSONRoundTripBackwardCompatible() throws {
+        let json = """
+        {
+            "id": "E621E1F8-C36C-495A-93FC-0C247A3E6E5F",
+            "name": "Legacy",
+            "bands": [{"id": "A0A0A0A0-B0B0-4040-A0A0-B0B0C0C0D0D0", "frequency": 1000, "gain": 3.0}],
+            "preamp": 0.0,
+            "createdAt": 725328000,
+            "updatedAt": 725328000
+        }
+        """
+        let data = try XCTUnwrap(json.data(using: .utf8))
+        let decoder = JSONDecoder()
+        let preset = try decoder.decode(EQPreset.self, from: data)
+
+        XCTAssertEqual(preset.name, "Legacy")
+        XCTAssertEqual(preset.mode, .graphic)
+        XCTAssertEqual(preset.preamp, 0)
+        XCTAssertEqual(preset.bands.count, 1)
+        XCTAssertEqual(preset.bands[0].q, EQBand.defaultQ, accuracy: 0.001)
+        XCTAssertEqual(preset.bands[0].filterType, .parametric)
+        XCTAssertTrue(preset.bands[0].isEnabled)
+    }
+
+    func testPresetJSONRoundTripWithMode() throws {
+        let json = """
+        {
+            "id": "E621E1F8-C36C-495A-93FC-0C247A3E6E5F",
+            "name": "Parametric Test",
+            "mode": "parametric",
+            "bands": [{"id": "A0A0A0A0-B0B0-4040-A0A0-B0B0C0C0D0D0", "frequency": 80, "gain": 2.0, "q": 0.7, "filterType": "lowShelf", "isEnabled": true}],
+            "preamp": -1.5,
+            "createdAt": 725328000,
+            "updatedAt": 725328000
+        }
+        """
+        let data = try XCTUnwrap(json.data(using: .utf8))
+        let decoder = JSONDecoder()
+        let preset = try decoder.decode(EQPreset.self, from: data)
+
+        XCTAssertEqual(preset.mode, .parametric)
+        XCTAssertEqual(preset.preamp, -1.5, accuracy: 0.001)
+        XCTAssertEqual(preset.bands[0].filterType, .lowShelf)
+        XCTAssertEqual(preset.bands[0].q, 0.7, accuracy: 0.001)
+    }
+
+    // MARK: - SpectrumAnalyzer
+
     func testSpectrumAnalyzerResetClearsAllLevels() {
         let analysis = SpectrumAnalyzer().reset()
 
@@ -39,6 +197,40 @@ final class OpenEQTests: XCTestCase {
         XCTAssertEqual(analysis.peakLevel, 0)
         XCTAssertFalse(analysis.isClipping)
     }
+
+    func testSpectrumAnalyzerProcessesSineWave() {
+        let analyzer = SpectrumAnalyzer()
+        let sampleRate: Double = 44100
+        let frequency: Float = 440
+        let frameLength = 1024
+
+        let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 2)!
+        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(frameLength)) else {
+            XCTFail("Failed to create buffer")
+            return
+        }
+        buffer.frameLength = AVAudioFrameCount(frameLength)
+
+        guard let floatDataLeft = buffer.floatChannelData?[0],
+              let floatDataRight = buffer.floatChannelData?[1] else {
+            XCTFail("No channel data")
+            return
+        }
+
+        for i in 0..<frameLength {
+            let sample = sin(2 * Float.pi * frequency * Float(i) / Float(sampleRate))
+            floatDataLeft[i] = sample
+            floatDataRight[i] = sample
+        }
+
+        let analysis = analyzer.analyze(buffer: buffer)
+        XCTAssertNotNil(analysis)
+        XCTAssertEqual(analysis?.levels.count, SpectrumAnalyzer.barCount)
+        XCTAssertGreaterThan(analysis?.leftPeak ?? 0, 0)
+        XCTAssertGreaterThan(analysis?.rightPeak ?? 0, 0)
+    }
+
+    // MARK: - AudioEngineController
 
     func testAudioEngineRejectsNonFileURLWithoutCrashing() throws {
         let controller = AudioEngineController()
@@ -100,5 +292,39 @@ final class OpenEQTests: XCTestCase {
         try await Task.sleep(nanoseconds: 1_000_000_000)
 
         XCTAssertEqual(controller.playbackState, .stopped)
+    }
+
+    // MARK: - GraphicBandCount
+
+    func testGraphicBandCountValues() {
+        XCTAssertEqual(GraphicBandCount.ten.bandCount, 10)
+        XCTAssertEqual(GraphicBandCount.thirtyOne.bandCount, 31)
+    }
+
+    // MARK: - EQMode
+
+    func testEQModeIdentifiers() {
+        XCTAssertEqual(EQMode.graphic.id, "graphic")
+        XCTAssertEqual(EQMode.parametric.id, "parametric")
+    }
+
+    // MARK: - EQFilterType
+
+    func testEQFilterTypeAllCases() {
+        let types = EQFilterType.allCases
+        XCTAssertEqual(types.count, 5)
+        XCTAssertTrue(types.contains(.parametric))
+        XCTAssertTrue(types.contains(.lowShelf))
+        XCTAssertTrue(types.contains(.highShelf))
+        XCTAssertTrue(types.contains(.lowPass))
+        XCTAssertTrue(types.contains(.highPass))
+    }
+
+    func testEQFilterTypeTitles() {
+        XCTAssertEqual(EQFilterType.parametric.title, "Parametric")
+        XCTAssertEqual(EQFilterType.lowShelf.title, "Low Shelf")
+        XCTAssertEqual(EQFilterType.highShelf.title, "High Shelf")
+        XCTAssertEqual(EQFilterType.lowPass.title, "Low Pass")
+        XCTAssertEqual(EQFilterType.highPass.title, "High Pass")
     }
 }

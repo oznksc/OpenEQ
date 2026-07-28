@@ -30,6 +30,7 @@ final class AudioEngineController {
     private let player = AVAudioPlayerNode()
     private let eq = AVAudioUnitEQ(numberOfBands: 31)
     private let analyzer = SpectrumAnalyzer()
+    private let limiter: AVAudioUnitEffect
     
     private var audioFile: AVAudioFile?
     private var currentFileURL: URL?
@@ -39,7 +40,16 @@ final class AudioEngineController {
     private var playbackGeneration: UInt64 = 0
 
     init() {
+        let limiterDesc = AudioComponentDescription(
+            componentType: kAudioUnitType_Effect,
+            componentSubType: kAudioUnitSubType_PeakLimiter,
+            componentManufacturer: kAudioUnitManufacturer_Apple,
+            componentFlags: 0,
+            componentFlagsMask: 0
+        )
+        limiter = AVAudioUnitEffect(audioComponentDescription: limiterDesc)
         configureEQ()
+        configureLimiter()
     }
     
     deinit {
@@ -79,6 +89,18 @@ final class AudioEngineController {
         }
     }
 
+    private func configureLimiter() {
+        guard let paramTree = limiter.auAudioUnit.parameterTree else { return }
+        paramTree.allParameters.forEach { param in
+            switch param.identifier {
+            case "attackTime": param.value = 0.005
+            case "releaseTime": param.value = 0.05
+            case "preGain": param.value = 0.0
+            default: break
+            }
+        }
+    }
+
     private func attachNodesIfNeeded() {
         if player.engine == nil {
             engine.attach(player)
@@ -86,6 +108,10 @@ final class AudioEngineController {
 
         if eq.engine == nil {
             engine.attach(eq)
+        }
+
+        if limiter.engine == nil {
+            engine.attach(limiter)
         }
     }
 
@@ -99,12 +125,13 @@ final class AudioEngineController {
         if isGraphConnected {
             engine.disconnectNodeOutput(player)
             engine.disconnectNodeOutput(eq)
+            engine.disconnectNodeOutput(limiter)
             isGraphConnected = false
         }
 
-        // Signal chain: playerNode -> eqNode -> mainMixerNode.
         engine.connect(player, to: eq, format: format)
-        engine.connect(eq, to: engine.mainMixerNode, format: format)
+        engine.connect(eq, to: limiter, format: format)
+        engine.connect(limiter, to: engine.mainMixerNode, format: format)
         isGraphConnected = true
     }
 
@@ -346,6 +373,7 @@ final class AudioEngineController {
         if isGraphConnected {
             engine.disconnectNodeOutput(player)
             engine.disconnectNodeOutput(eq)
+            engine.disconnectNodeOutput(limiter)
             isGraphConnected = false
         }
 
@@ -355,6 +383,10 @@ final class AudioEngineController {
 
         if eq.engine != nil {
             engine.detach(eq)
+        }
+
+        if limiter.engine != nil {
+            engine.detach(limiter)
         }
 
         audioFile = nil
@@ -407,6 +439,7 @@ final class AudioEngineController {
 
     func setBypass(_ bypass: Bool) {
         eq.bypass = bypass
+        limiter.bypass = bypass
     }
 
     func setVolumeBoost(_ multiplier: Double) {
