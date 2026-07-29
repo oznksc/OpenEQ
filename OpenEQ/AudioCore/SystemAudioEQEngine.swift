@@ -53,10 +53,12 @@ final class SystemAudioEQEngine {
         }
         stop()
         do {
-            // Keep the user's physical device as system default.
-            // Process-tap mute silences apps on that device; our aggregate IOProc
-            // plays the processed tap audio back through the same speakers.
-            // Setting default output to the aggregate is a common cause of total silence.
+            // Capture the physical device the user is currently using, then route the
+            // system default through our private aggregate that owns that device.
+            // Pattern:
+            //   apps → (default) aggregate → IOProc (EQ) → physical speakers
+            //   process tap supplies the mixed input streams on the aggregate
+            //   muteWhenTapped silences the dry path only while we are reading the tap
             physicalOutputID = try getDefaultOutputDeviceID()
             refreshPhysicalOutputMetadata()
             try setupTap()
@@ -68,16 +70,19 @@ final class SystemAudioEQEngine {
                 dspState.isEmergencyMuted = false
             }
             try setupAggregateWithOutput()
+            // Start reading the tap BEFORE claiming the default output so
+            // mutedWhenTapped engages with a live consumer.
             try startAggIO()
+            try setDefaultOutput(aggDeviceID)
             startObservingDefaultOutput()
             isRunning = true
             latencyEstimate = estimateLatency()
             publishStatus(.running)
             logger.info(
-                "System-wide EQ started (tap muted → aggregate IO → \(physicalOutputName ?? "output"), rate \(sampleRate))"
+                "System-wide EQ started → \(physicalOutputName ?? "output") @ \(sampleRate) Hz"
             )
         } catch {
-            cleanup()
+            cleanup(restoreOutput: true)
             let mapped = mapStartError(error)
             publishStatus(mapped)
             logger.error("Start failed: \(mapped.title)")
@@ -86,7 +91,7 @@ final class SystemAudioEQEngine {
 
     func stop() {
         stopObservingDefaultOutput()
-        cleanup()
+        cleanup(restoreOutput: true)
         ioQueue.sync {
             dspState.reset()
             feedbackGuard.reset()
@@ -149,19 +154,22 @@ final class SystemAudioEQEngine {
             return
         }
 
-        // Ignore our private aggregate if it somehow became default (legacy bug recovery).
+        // Still routing through our engine — nothing to do.
         if currentDefault == aggDeviceID {
-            if physicalOutputID != kAudioObjectUnknown {
-                try? setDefaultOutput(physicalOutputID)
+            return
+        }
+
+        // macOS restored the previous physical device as default; reclaim it.
+        if currentDefault == physicalOutputID {
+            do {
+                try setDefaultOutput(aggDeviceID)
+            } catch {
+                logger.error("Failed to re-claim default output: \(error.localizedDescription)")
             }
             return
         }
 
-        // Same physical device — nothing to rebuild.
-        if currentDefault == physicalOutputID {
-            return
-        }
-
+        // User selected a new physical output device.
         isRebuilding = true
         logger.info("Rebuilding aggregate for new physical output \(currentDefault)")
 
@@ -173,6 +181,7 @@ final class SystemAudioEQEngine {
             refreshPhysicalOutputMetadata()
             try setupAggregateWithOutput()
             try startAggIO()
+            try setDefaultOutput(aggDeviceID)
             latencyEstimate = estimateLatency()
             isRebuilding = false
             publishStatus(.running)
@@ -181,7 +190,7 @@ final class SystemAudioEQEngine {
         } catch {
             isRebuilding = false
             logger.error("Rebuild failed: \(error.localizedDescription)")
-            cleanup()
+            cleanup(restoreOutput: true)
             isRunning = false
             latencyEstimate = nil
             publishStatus(.failed("Device change failed: \(error.localizedDescription)"))
@@ -192,12 +201,12 @@ final class SystemAudioEQEngine {
 
     @available(macOS 14.2, *)
     private func setupTap() throws {
-        // Mute tapped processes at their destination (physical default) so we do not
-        // hear dry + wet. Processed audio is played via the aggregate IOProc instead.
+        // Global stereo mix of all processes. mutedWhenTapped keeps dry audio flowing
+        // until our aggregate IOProc starts reading; then dry is muted and we own wet.
         let desc = CATapDescription(stereoGlobalTapButExcludeProcesses: [])
         desc.name = "OpenEQ System Audio"
         desc.isPrivate = true
-        desc.muteBehavior = .muted
+        desc.muteBehavior = .mutedWhenTapped
 
         var newTapID = AudioObjectID(kAudioObjectUnknown)
         let err = AudioHardwareCreateProcessTap(desc, &newTapID)
@@ -223,34 +232,43 @@ final class SystemAudioEQEngine {
         let tapUID = try getTapUID()
         let aggUID = "com.openeq.agg.\(UUID().uuidString)"
 
-        // Physical device is the only output subdevice and the clock master.
-        // Process tap is attached as a tap source (input streams on the aggregate).
+        // Physical speakers/headphones are the only output subdevice and clock master.
+        // Process tap is attached via the taps array (CFArray of CFDictionaries).
         let subDevices: [[String: Any]] = [
-            [
-                kAudioSubDeviceUIDKey: outputUID,
-                kAudioSubDeviceInputChannelsKey: 0,
-                // Prefer full duplex channel use from the physical device as output.
-            ]
+            [kAudioSubDeviceUIDKey: outputUID]
+        ]
+        let taps: [[String: Any]] = [
+            [kAudioSubTapUIDKey: tapUID]
         ]
 
         let desc: [String: Any] = [
             kAudioAggregateDeviceNameKey: "OpenEQ Engine",
             kAudioAggregateDeviceUIDKey: aggUID,
             kAudioAggregateDeviceIsPrivateKey: true,
+            kAudioAggregateDeviceIsStackedKey: false,
             kAudioAggregateDeviceMainSubDeviceKey: outputUID,
+            kAudioAggregateDeviceClockDeviceKey: outputUID,
             kAudioAggregateDeviceSubDeviceListKey: subDevices,
+            kAudioAggregateDeviceTapListKey: taps,
+            kAudioAggregateDeviceTapAutoStartKey: true,
         ]
 
         var newAggID = AudioObjectID(kAudioObjectUnknown)
-        let err = AudioHardwareCreateAggregateDevice(desc as CFDictionary, &newAggID)
-        guard err == noErr else { throw SystemAudioEQError.failed("Create aggregate: \(err)") }
-        aggDeviceID = newAggID
-        // Attach process tap after create (array of tap UIDs) — most reliable path.
-        try setTapList(tapUID)
+        var err = AudioHardwareCreateAggregateDevice(desc as CFDictionary, &newAggID)
+        if err != noErr {
+            // Fallback: create without taps, attach via property.
+            var fallback = desc
+            fallback.removeValue(forKey: kAudioAggregateDeviceTapListKey)
+            fallback.removeValue(forKey: kAudioAggregateDeviceTapAutoStartKey)
+            err = AudioHardwareCreateAggregateDevice(fallback as CFDictionary, &newAggID)
+            guard err == noErr else { throw SystemAudioEQError.failed("Create aggregate: \(err)") }
+            aggDeviceID = newAggID
+            try setTapList(tapUID)
+        } else {
+            aggDeviceID = newAggID
+        }
 
-        // Align aggregate sample rate with the tap / physical device when possible.
         try? setDeviceSampleRate(aggDeviceID, sampleRate)
-
         logger.info("Aggregate created with physical output \(outputUID) + tap")
     }
 
@@ -260,8 +278,10 @@ final class SystemAudioEQEngine {
             mScope: kAudioObjectPropertyScopeGlobal,
             mElement: kAudioObjectPropertyElementMain
         )
-        var list: CFArray? = [tapUID] as CFArray
-        let err = withUnsafeMutablePointer(to: &list) { ptr in
+        // Property accepts either UID strings or sub-tap dictionaries depending on OS;
+        // prefer dictionary form matching the create-time key.
+        var list: CFArray? = [[kAudioSubTapUIDKey: tapUID]] as CFArray
+        var err = withUnsafeMutablePointer(to: &list) { ptr in
             AudioObjectSetPropertyData(
                 aggDeviceID,
                 &addr,
@@ -270,6 +290,19 @@ final class SystemAudioEQEngine {
                 UInt32(MemoryLayout<CFArray>.size),
                 ptr
             )
+        }
+        if err != noErr {
+            var simple: CFArray? = [tapUID] as CFArray
+            err = withUnsafeMutablePointer(to: &simple) { ptr in
+                AudioObjectSetPropertyData(
+                    aggDeviceID,
+                    &addr,
+                    UInt32(0),
+                    nil,
+                    UInt32(MemoryLayout<CFArray>.size),
+                    ptr
+                )
+            }
         }
         guard err == noErr else { throw SystemAudioEQError.failed("Set tap list: \(err)") }
     }
@@ -762,11 +795,14 @@ final class SystemAudioEQEngine {
         }
     }
 
-    private func cleanup() {
-        // Recover if a previous buggy build left our aggregate as the system default.
-        if let defaultID = try? getDefaultOutputDeviceID(),
-           defaultID == aggDeviceID,
-           physicalOutputID != kAudioObjectUnknown {
+    private func cleanup(restoreOutput: Bool = false) {
+        // Always try to put the user's speakers/headphones back as the system default
+        // before tearing the aggregate down, otherwise macOS can end up with no device.
+        if restoreOutput, physicalOutputID != kAudioObjectUnknown {
+            try? setDefaultOutput(physicalOutputID)
+        } else if let defaultID = try? getDefaultOutputDeviceID(),
+                  defaultID == aggDeviceID,
+                  physicalOutputID != kAudioObjectUnknown {
             try? setDefaultOutput(physicalOutputID)
         }
         stopAggIO()

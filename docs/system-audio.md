@@ -7,7 +7,7 @@ OpenEQ can process system-wide audio on macOS 14.2+ using a Core Audio process t
 ## Modes
 
 - **Disabled**: EQ applies only to local file playback.
-- **System-Wide EQ** (primary): Captures system audio via `CATapDescription` (muted at the destination), processes with biquad EQ + peak limiter, and plays through a private aggregate that includes the **physical** output. The system default output stays on the physical device (it is **not** switched to the aggregate — that pattern causes total silence).
+- **System-Wide EQ** (primary): Private aggregate owns the physical speakers + a process tap. System default output is briefly redirected to that aggregate while System EQ runs (restored on stop). Tap uses `mutedWhenTapped` so dry audio is silenced only while OpenEQ is reading/processing the stream.
 - **External Loopback** (advanced): User routes macOS output through a virtual device such as BlackHole; OpenEQ processes that input with `AVAudioEngine`.
 
 ## Permissions
