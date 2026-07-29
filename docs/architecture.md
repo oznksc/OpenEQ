@@ -65,13 +65,22 @@ See [system-audio.md](system-audio.md).
   - 1024-sample FFT, Hanning window, power → dB → normalized bars  
   - Peak / clip metadata for meters  
 
-## 6. Presets
+## 6. Presets & calibration
 
 - **PresetStore** — `~/Library/Application Support/OpenEQ/presets.json`  
 - Built-in presets + user presets; import/export renews IDs on import  
+- **AutoEQCatalog** — bundled `autoeq_catalog.json` + fallback headphone list  
+- **CalibrationImporter** — AutoEQ GraphicEQ/ParametricEQ, REW Equalizer APO, FR CSV  
+- **HeadphoneLibraryView** — search/apply profiles; file import panel  
 
-## 7. Permissions & privacy
+## 7. Platform
+
+- macOS is the shipping host; iOS/visionOS expansion plan lives in `docs/platform.md`.  
+- `ChannelLayout` marks multi-channel as a foundation only.
+
+## 8. Permissions & privacy
 
 - System EQ: Screen & System Audio Recording  
 - Info.plist usage strings for audio capture / microphone (loopback)  
 - All processing is local; no cloud audio upload  
+- Headphone catalog is bundled offline; autoeq.app is optional external browse only

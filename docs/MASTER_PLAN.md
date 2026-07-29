@@ -48,13 +48,21 @@ Current technical status, completed work, open gaps, roadmap, and test protocols
 2. **Dynamics** — Apple dynamics processor + stereo balance; brickwall peak limiter remains post-chain.
 3. **AUv3 insert** — discover/load/unload effect AUs on the local file graph.
 
+### Completed in Phase 4 (calibration)
+
+1. **Headphone library** — curated AutoEQ-style 10-band profiles + search/apply.
+2. **Calibration import** — AutoEQ GraphicEQ/ParametricEQ, REW Equalizer APO, FR CSV.
+3. **Platform docs** — iOS/visionOS expansion plan; multi-channel foundation types.
+
 ### Remaining gaps
 
 | Gap | Severity | Target phase |
 |-----|----------|--------------|
-| Real bundled virtual output device | Medium | Phase 2.5 / later |
+| Real bundled virtual output device | Medium | later |
 | AUv3 on system-wide path | Medium | later |
-| AutoEQ headphone library | Medium (love feature) | Phase 4 |
+| Live AutoEQ online API (full 6000+) | Medium | later |
+| Per-channel 5.1 / Atmos EQ UI | Medium | later |
+| iOS / visionOS app targets | High effort | later |
 | AU view controller UI | Low | polish |
 
 ---
@@ -96,10 +104,10 @@ graph TD
 - Dynamics panel: compressor + stereo balance; peak limiter always on
 - AUv3 effect insert on **local playback** graph (system-wide AU host deferred)
 
-### Phase 4 — Calibration & platform
-- AutoEQ (4000+ headphones)
-- REW import
-- iPadOS / visionOS shared core (later)
+### Phase 4 — Calibration & platform ✅ (core)
+- Curated AutoEQ-style headphone library + full-file import (GraphicEQ / Parametric / REW)
+- Multi-channel foundation (`ChannelLayout`) — stereo shipping; 5.1+ deferred
+- Cross-platform plan documented (`docs/platform.md`) — macOS ships; iOS/visionOS planned
 
 ---
 

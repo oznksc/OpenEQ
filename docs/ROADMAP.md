@@ -130,19 +130,23 @@ gantt
 
 ---
 
-## 🚀 PHASE 4: Pro Features, Smart Calibration & Cross-Platform (Q3 2027+)
+## ✅ PHASE 4: Pro Features, Smart Calibration & Cross-Platform (core complete)
 
-**Focus:** Extensive headphone preset libraries, automated measurements, and expansion across the Apple device ecosystem.
+**Focus:** Headphone calibration library, measurement import, multi-channel foundation, platform roadmap.
 
-### 4.1. AutoEQ Integration & Smart Calibration
-*   **4000+ Headphone Curves:** Integrate the [AutoEQ](https://github.com/jaakkopasanen/AutoEQ) database to apply optimal target curves for models from Sennheiser, Sony, Apple AirPods, etc.
-*   **Measurement File Import:** Support REW (Room EQ Wizard) JSON/TXT export configurations directly to load calculated room acoustics correction filters.
+### 4.1. AutoEQ Integration & Smart Calibration (shipped)
+*   **Curated headphone library:** Bundled AutoEQ-style 10-band profiles (search + one-click apply).
+*   **Full-database path:** Import any AutoEQ `GraphicEQ.txt` / `ParametricEQ.txt` (or from [autoeq.app](https://autoeq.app)).
+*   **REW import:** Equalizer APO-style filter exports and frequency-response CSV → OpenEQ bands.
+*   Imported curves can be saved as user presets.
 
-### 4.2. Multi-Channel Output (Surround/Spatial Audio)
-*   Support independent EQ calibration per channel for 5.1, 7.1, and Dolby Atmos audio setups.
+### 4.2. Multi-Channel Output (foundation)
+*   `ChannelLayout` model: stereo (supported) vs multi-channel (placeholder messaging).
+*   Full per-channel 5.1 / 7.1 / Atmos EQ UI deferred.
 
-### 4.3. Apple Ecosystem Expansion (iOS, iPadOS, visionOS)
-*   Adapt the SwiftUI frontend for iPad and Apple Vision Pro, sharing the underlying Core Audio and vDSP processing engine. Cloud synchronization will share custom presets across devices.
+### 4.3. Apple Ecosystem Expansion (planned)
+*   Strategy documented in `docs/platform.md`.
+*   No iOS/visionOS app target in this release — avoid overclaiming.
 
 ---
 

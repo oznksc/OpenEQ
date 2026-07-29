@@ -19,6 +19,7 @@ OpenEQ is a lightweight desktop EQ for:
 - Preamp (`-24` … `+24` dB), EQ bypass, volume boost up to 200%
 - **Dynamics:** compressor + stereo balance; peak limiter always on
 - **AUv3 insert** on the local playback chain (effect plugins)
+- **Headphone library** (AutoEQ-style) + import AutoEQ / REW calibration files
 - Real-time **64-band FFT spectrum** (Canvas + vDSP)
 - Built-in presets + custom save/import/export (JSON)
 - Menu bar: bypass, volume, recent presets, playback controls

@@ -560,4 +560,63 @@ final class OpenEQTests: XCTestCase {
         let code: FourCharCode = 0x61756678 // 'aufx'
         XCTAssertEqual(code.fourCharString, "aufx")
     }
+
+    // MARK: - Phase 4
+
+    func testCalibrationImporterParsesGraphicEQ() throws {
+        let text = """
+        Preamp: -6.2 dB
+        GraphicEQ: 20 2.0; 32 3.0; 64 2.5; 125 1.0; 250 0.5; 500 0.0; 1000 -0.5; 2000 1.0; 4000 2.0; 8000 1.5; 16000 1.0; 20000 0.5
+        """
+        let result = try CalibrationImporter.importText(text, sourceName: "Test HP")
+        XCTAssertEqual(result.formatName, "GraphicEQ")
+        XCTAssertEqual(result.preset.mode, .graphic)
+        XCTAssertEqual(result.preset.bands.count, 10)
+        XCTAssertEqual(result.preset.preamp, -6.2, accuracy: 0.01)
+        XCTAssertGreaterThan(result.preset.bands[0].gain, 0)
+    }
+
+    func testCalibrationImporterParsesParametric() throws {
+        let text = """
+        Preamp: -4.0 dB
+        Filter 1: ON LSC Fc 80 Hz Gain 3.5 dB Q 0.70
+        Filter 2: ON PK Fc 1000 Hz Gain -2.0 dB Q 1.41
+        Filter 3: ON HSC Fc 8000 Hz Gain 1.5 dB Q 0.70
+        """
+        let result = try CalibrationImporter.importText(text, sourceName: "Para Test")
+        XCTAssertEqual(result.formatName, "Parametric EQ")
+        XCTAssertEqual(result.preset.mode, .parametric)
+        XCTAssertEqual(result.preset.bands.count, 3)
+        XCTAssertEqual(result.preset.bands[0].filterType, .lowShelf)
+        XCTAssertEqual(result.preset.bands[1].filterType, .parametric)
+        XCTAssertEqual(result.preset.bands[2].filterType, .highShelf)
+        XCTAssertEqual(result.preset.preamp, -4.0, accuracy: 0.01)
+    }
+
+    func testHeadphoneProfileAsPresetTenBand() {
+        let profile = HeadphoneProfile(
+            name: "Test",
+            brand: "Brand",
+            gains: [1, 2, 3, 0, 0, 0, -1, -2, -1, 0],
+            preamp: -3
+        )
+        let preset = profile.asPreset(graphicBandCount: .ten)
+        XCTAssertEqual(preset.bands.count, 10)
+        XCTAssertEqual(preset.bands[1].gain, 2, accuracy: 0.01)
+        XCTAssertEqual(preset.preamp, -3, accuracy: 0.01)
+        XCTAssertEqual(preset.mode, .graphic)
+    }
+
+    func testAutoEQCatalogFallbackNotEmpty() {
+        let catalog = AutoEQCatalog()
+        let profiles = catalog.loadBundledProfiles()
+        XCTAssertFalse(profiles.isEmpty)
+        let search = catalog.search("Sennheiser", in: profiles)
+        XCTAssertFalse(search.isEmpty)
+    }
+
+    func testChannelLayoutStereoSupported() {
+        XCTAssertTrue(ChannelLayout.stereo.isFullySupported)
+        XCTAssertFalse(ChannelLayout.multiChannel.isFullySupported)
+    }
 }

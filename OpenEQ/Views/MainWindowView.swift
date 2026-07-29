@@ -45,6 +45,7 @@ struct MainWindowView: View {
                     ScrollView(.vertical, showsIndicators: false) {
                         VStack(spacing: 12) {
                             PresetPanelView(viewModel: viewModel)
+                            HeadphoneLibraryView(viewModel: viewModel)
                             DynamicsPanelView(viewModel: viewModel)
                             AUv3PanelView(viewModel: viewModel)
                         }

@@ -151,6 +151,9 @@ final class OpenEQViewModel {
     var loadedAUPluginName: String?
     var isLoadingAUPlugin = false
     var auPluginError: String?
+    var headphoneProfiles: [HeadphoneProfile] = []
+    var calibrationImportMessage: String?
+    var channelLayout: ChannelLayout = .stereo
 
     var playbackDuration: TimeInterval {
         audioEngineController.playbackDuration
@@ -165,6 +168,7 @@ final class OpenEQViewModel {
     private let presetStore = PresetStore()
     private let deviceProfileStore = DeviceProfileStore()
     private let auPluginHost = AUv3PluginHost()
+    private let autoEQCatalog = AutoEQCatalog()
     private var graphicBands: [EQBand]
     private var parametricBands: [EQBand]
     private var isApplyingDeviceProfile = false
@@ -643,6 +647,72 @@ final class OpenEQViewModel {
         auPluginHost.unloadPlugin()
         loadedAUPluginName = nil
         auPluginError = nil
+    }
+
+    // MARK: - AutoEQ / Calibration
+
+    func loadHeadphoneCatalogIfNeeded() {
+        guard headphoneProfiles.isEmpty else { return }
+        headphoneProfiles = autoEQCatalog.loadBundledProfiles()
+    }
+
+    func filteredHeadphoneProfiles(query: String) -> [HeadphoneProfile] {
+        loadHeadphoneCatalogIfNeeded()
+        return autoEQCatalog.search(query, in: headphoneProfiles)
+    }
+
+    func applyHeadphoneProfile(_ profile: HeadphoneProfile) {
+        let preset = profile.asPreset(graphicBandCount: graphicBandCount == .thirtyOne ? .thirtyOne : .ten)
+        // Ensure graphic mode for headphone curves.
+        if eqMode != .graphic {
+            setEQMode(.graphic)
+        }
+        applyPreset(preset)
+        // Keep as user-facing custom/applied name.
+        calibrationImportMessage = "Applied \(profile.displayName) (\(profile.target))."
+        errorMessage = nil
+    }
+
+    func importCalibrationFile() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.allowedContentTypes = [
+            .plainText,
+            .text,
+            .commaSeparatedText,
+            UTType(filenameExtension: "txt") ?? .plainText,
+            UTType(filenameExtension: "csv") ?? .commaSeparatedText
+        ].compactMap { $0 }
+        panel.title = "Import AutoEQ / REW Calibration"
+        panel.message = "Select GraphicEQ.txt, ParametricEQ.txt, REW Equalizer APO export, or FR CSV."
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        do {
+            let result = try CalibrationImporter.importFile(at: url)
+            applyPreset(result.preset)
+            if result.preset.mode == .graphic, eqMode != .graphic {
+                // applyPreset already sets mode from preset
+            }
+            calibrationImportMessage = "Imported \(result.formatName): \(result.sourceName)"
+            errorMessage = nil
+
+            // Offer to keep as a user preset automatically under imported name.
+            if !userPresets.contains(where: { $0.name == result.preset.name }) {
+                saveCurrentPreset(name: result.preset.name, bands: bands, preamp: preamp)
+            }
+        } catch {
+            calibrationImportMessage = nil
+            errorMessage = "Import failed: \(error.localizedDescription)"
+        }
+    }
+
+    func setChannelLayout(_ layout: ChannelLayout) {
+        channelLayout = layout
+        if layout == .multiChannel {
+            calibrationImportMessage = "Multi-channel per-speaker EQ is a foundation only — stereo processing remains active."
+        }
     }
 
     func gain(for bandID: EQBand.ID) -> Float {

@@ -23,7 +23,9 @@ MVVM with `@Observable`:
 - `DeviceProfileStore` — per-device UID → preset map
 - `AUv3PluginHost` — local-graph effect insert only (not system-wide)
 - Interactive `EQCurveView` — drag nodes; scroll Q in parametric mode
+- `AutoEQCatalog` + `CalibrationImporter` — headphone library and AutoEQ/REW import
 - Do **not** claim a shipped virtual HAL/DriverKit device; CATap is the primary system path (see `docs/virtual-driver.md`)
+- Do **not** claim full iOS/visionOS apps or 5.1 per-channel EQ until those targets exist (`docs/platform.md`)
 
 ## Audio Formats
 
