@@ -220,7 +220,8 @@ final class SystemAudioEQEngine {
 
     @available(macOS 14.2, *)
     private func setupTap() throws {
-        // Exclude OpenEQ itself so our wet output is not re-captured.
+        // Same constructor as the working CoreAudioTapManager monitor path.
+        // Exclude OpenEQ only when we can resolve our process object reliably.
         var exclude: [AudioObjectID] = []
         if let selfProcess = try? processObjectID(forPID: getpid()),
            selfProcess != kAudioObjectUnknown {
@@ -229,11 +230,9 @@ final class SystemAudioEQEngine {
 
         let desc = CATapDescription(stereoGlobalTapButExcludeProcesses: exclude)
         desc.name = "OpenEQ System Audio"
-        // Public enough for system routing; still named for diagnostics.
         desc.isPrivate = true
-        // Dry path stays live until our aggregate IOProc is reading the tap.
+        // Mute dry path only while the aggregate is reading the tap.
         desc.muteBehavior = .mutedWhenTapped
-        tapUUIDString = desc.uuid.uuidString
 
         var newTapID = AudioObjectID(kAudioObjectUnknown)
         let err = AudioHardwareCreateProcessTap(desc, &newTapID)
@@ -242,16 +241,15 @@ final class SystemAudioEQEngine {
         }
         tapID = newTapID
 
-        // Prefer hardware UID string from the live tap object.
-        if let liveUID = try? getTapUID() as String {
-            tapUUIDString = liveUID
-        }
+        // Always use the live tap UID from HAL (not the description's pre-create UUID).
+        let liveUID = try getTapUID() as String
+        tapUUIDString = liveUID
 
         let tapFormat = try getTapFormat()
         sampleRate = tapFormat.mSampleRate > 0 ? tapFormat.mSampleRate : 48_000
         channelCount = max(1, tapFormat.mChannelsPerFrame)
         logger.info(
-            "Tap ready uuid=\(tapUUIDString ?? "?") rate=\(sampleRate) ch=\(channelCount) flags=\(tapFormat.mFormatFlags)"
+            "Tap ready uid=\(liveUID) rate=\(sampleRate) ch=\(channelCount) flags=\(tapFormat.mFormatFlags)"
         )
     }
 
@@ -267,81 +265,136 @@ final class SystemAudioEQEngine {
         let subDevices: [[String: Any]] = [
             [kAudioSubDeviceUIDKey: outputUID]
         ]
-        // Create-time tap entries are dictionaries with kAudioSubTapUIDKey.
-        let taps: [[String: Any]] = [
-            [kAudioSubTapUIDKey: tapUUIDString]
-        ]
 
-        // Public aggregate so it can be the system default output for other apps.
+        // Match the known-working monitor path: create aggregate first, then attach
+        // the tap via kAudioAggregateDevicePropertyTapList as CFArray of UID strings.
+        // (Create-time "taps" dictionaries are flaky across macOS builds.)
         let desc: [String: Any] = [
             kAudioAggregateDeviceNameKey: "OpenEQ",
             kAudioAggregateDeviceUIDKey: kOpenEQAggregateUID,
-            kAudioAggregateDeviceIsPrivateKey: false,
-            kAudioAggregateDeviceIsStackedKey: false,
+            // Private aggregates can still be set as default by object ID and avoid
+            // cluttering Sound prefs for other users of the machine.
+            kAudioAggregateDeviceIsPrivateKey: true,
             kAudioAggregateDeviceMainSubDeviceKey: outputUID,
-            kAudioAggregateDeviceClockDeviceKey: outputUID,
             kAudioAggregateDeviceSubDeviceListKey: subDevices,
-            kAudioAggregateDeviceTapListKey: taps,
-            kAudioAggregateDeviceTapAutoStartKey: 1,
         ]
 
         var newAggID = AudioObjectID(kAudioObjectUnknown)
-        var err = AudioHardwareCreateAggregateDevice(desc as CFDictionary, &newAggID)
-        if err != noErr {
-            logger.warning("Aggregate create with taps failed (\(err)); retrying attach path")
-            var fallback = desc
-            fallback.removeValue(forKey: kAudioAggregateDeviceTapListKey)
-            fallback.removeValue(forKey: kAudioAggregateDeviceTapAutoStartKey)
-            err = AudioHardwareCreateAggregateDevice(fallback as CFDictionary, &newAggID)
-            guard err == noErr else {
-                throw SystemAudioEQError.failed(
-                    "Create aggregate failed (\(err)). Quit Boom/DeskFx audio enhancers and retry."
-                )
-            }
-            aggDeviceID = newAggID
-            try setTapListProperty(tapUUIDString)
-        } else {
-            aggDeviceID = newAggID
+        let err = AudioHardwareCreateAggregateDevice(desc as CFDictionary, &newAggID)
+        guard err == noErr else {
+            throw SystemAudioEQError.failed(
+                "Create aggregate failed (\(err) / \(fourCC(err)))."
+            )
+        }
+        aggDeviceID = newAggID
+
+        try setTapListProperty(tapUUIDString)
+
+        // Optional create-time style dict attach if UID-string attach left no sub-taps.
+        if !hasActiveSubTaps() {
+            logger.warning("UID tap list produced no sub-taps; trying dictionary composition")
+            try setTapListViaComposition(tapUUIDString, outputUID: outputUID)
         }
 
-        // Ensure property list matches (UUID strings).
-        try? setTapListProperty(tapUUIDString)
         try? setDeviceSampleRate(aggDeviceID, sampleRate)
 
         let inputCh = (try? streamChannelCount(device: aggDeviceID, scope: kAudioDevicePropertyScopeInput)) ?? 0
         let outputCh = (try? streamChannelCount(device: aggDeviceID, scope: kAudioDevicePropertyScopeOutput)) ?? 0
-        logger.info("Aggregate id=\(aggDeviceID) inCh=\(inputCh) outCh=\(outputCh)")
-        if inputCh == 0 {
+        let subTaps = activeSubTapCount()
+        logger.info("Aggregate id=\(aggDeviceID) inCh=\(inputCh) outCh=\(outputCh) subTaps=\(subTaps)")
+
+        // StreamConfiguration often reports 0 input channels for tap-backed aggregates
+        // until IO is started — do NOT hard-fail on inCh. Fail only if sub-tap attach failed.
+        if subTaps == 0 && inputCh == 0 {
             throw SystemAudioEQError.failed(
-                "Aggregate has no tap input streams. Check Screen & System Audio Recording permission and disable conflicting HAL plugins (Boom, DeskFx)."
+                "Could not attach process tap to aggregate (no sub-taps). Toggle Screen & System Audio Recording for OpenEQ off/on, then Retry Start."
             )
         }
         if outputCh == 0 {
-            throw SystemAudioEQError.failed("Aggregate has no output streams for the physical device.")
+            throw SystemAudioEQError.failed(
+                "Aggregate has no output to \(physicalOutputName ?? "the selected device"). Pick Speakers/Headphones in Sound settings and retry."
+            )
         }
     }
 
     private func setTapListProperty(_ tapUUID: String) throws {
-        var addr = AudioObjectPropertyAddress(
+        var address = AudioObjectPropertyAddress(
             mSelector: kAudioAggregateDevicePropertyTapList,
             mScope: kAudioObjectPropertyScopeGlobal,
             mElement: kAudioObjectPropertyElementMain
         )
-        // Docs: CFArray of CFStrings (tap UUIDs).
-        var list: CFArray? = [tapUUID] as CFArray
-        let err = withUnsafeMutablePointer(to: &list) { ptr in
+        // Identical pattern to CoreAudioTapManager (known working for process taps).
+        var tapList = [tapUUID as CFString] as CFArray
+        let dataSize = UInt32(MemoryLayout<CFArray>.size)
+        let status = withUnsafePointer(to: &tapList) { pointer in
             AudioObjectSetPropertyData(
                 aggDeviceID,
-                &addr,
+                &address,
                 0,
                 nil,
-                UInt32(MemoryLayout<CFArray>.size),
-                ptr
+                dataSize,
+                pointer
             )
         }
-        guard err == noErr else {
-            throw SystemAudioEQError.failed("Set tap list failed (\(err) / \(fourCC(err)))")
+        guard status == noErr else {
+            throw SystemAudioEQError.failed("Set tap list failed (\(status) / \(fourCC(status)))")
         }
+    }
+
+    /// Rebuild composition with explicit subdevice + tap dictionaries.
+    private func setTapListViaComposition(_ tapUUID: String, outputUID: String) throws {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioAggregateDevicePropertyComposition,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        let composition: [String: Any] = [
+            kAudioAggregateDeviceNameKey: "OpenEQ",
+            kAudioAggregateDeviceUIDKey: kOpenEQAggregateUID,
+            kAudioAggregateDeviceIsPrivateKey: true,
+            kAudioAggregateDeviceMainSubDeviceKey: outputUID,
+            kAudioAggregateDeviceSubDeviceListKey: [
+                [kAudioSubDeviceUIDKey: outputUID]
+            ],
+            kAudioAggregateDeviceTapListKey: [
+                [kAudioSubTapUIDKey: tapUUID]
+            ],
+            kAudioAggregateDeviceTapAutoStartKey: 1,
+        ]
+        var dict = composition as CFDictionary
+        let status = withUnsafePointer(to: &dict) { pointer in
+            AudioObjectSetPropertyData(
+                aggDeviceID,
+                &address,
+                0,
+                nil,
+                UInt32(MemoryLayout<CFDictionary>.size),
+                pointer
+            )
+        }
+        if status != noErr {
+            logger.warning("Composition update failed (\(status) / \(fourCC(status)))")
+        }
+    }
+
+    private func activeSubTapCount() -> Int {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioAggregateDevicePropertySubTapList,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var dataSize: UInt32 = 0
+        var status = AudioObjectGetPropertyDataSize(aggDeviceID, &address, 0, nil, &dataSize)
+        guard status == noErr, dataSize > 0 else { return 0 }
+        let count = Int(dataSize) / MemoryLayout<AudioObjectID>.size
+        var ids = [AudioObjectID](repeating: 0, count: count)
+        status = AudioObjectGetPropertyData(aggDeviceID, &address, 0, nil, &dataSize, &ids)
+        guard status == noErr else { return 0 }
+        return ids.filter { $0 != kAudioObjectUnknown }.count
+    }
+
+    private func hasActiveSubTaps() -> Bool {
+        activeSubTapCount() > 0
     }
 
     private func startAggIO() throws {
