@@ -625,7 +625,7 @@ final class AudioEngineController {
             }
 
             DispatchQueue.main.async {
-                self.spectrumLevels = analysis.levels
+                self.spectrumLevels = Array(analysis.levels)
                 self.leftLevel = analysis.leftPeak
                 self.rightLevel = analysis.rightPeak
                 self.peakLevel = analysis.peakLevel
@@ -653,7 +653,7 @@ final class AudioEngineController {
         let analysis = analyzer.reset()
 
         let update = {
-            self.spectrumLevels = analysis.levels
+            self.spectrumLevels = Array(analysis.levels)
             self.leftLevel = analysis.leftPeak
             self.rightLevel = analysis.rightPeak
             self.peakLevel = analysis.peakLevel

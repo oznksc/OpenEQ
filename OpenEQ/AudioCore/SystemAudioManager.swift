@@ -150,7 +150,11 @@ final class SystemAudioManager {
         status = .stopped
     }
 
-    func startSystemEQ(preset: EQPreset = .flatPreset()) {
+    func startSystemEQ() {
+        startSystemEQ(preset: EQPreset.flatPreset())
+    }
+
+    func startSystemEQ(preset: EQPreset) {
         stopActive()
         mode = .systemEQ
         lastSystemEQPreset = preset
@@ -369,7 +373,7 @@ final class SystemAudioManager {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in
+            Task { @MainActor [weak self] in
                 self?.handleWillSleep()
             }
         }
@@ -379,7 +383,7 @@ final class SystemAudioManager {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in
+            Task { @MainActor [weak self] in
                 self?.handleDidWake()
             }
         }
@@ -510,7 +514,7 @@ final class SystemAudioManager {
     }
 
     private func applyAnalysis(_ analysis: SpectrumAnalysis) {
-        spectrumLevels = analysis.levels
+        spectrumLevels = Array(analysis.levels)
         leftLevel = analysis.leftPeak
         rightLevel = analysis.rightPeak
         peakLevel = analysis.peakLevel

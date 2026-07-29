@@ -9,8 +9,33 @@ import Foundation
 import Accelerate
 import AVFoundation
 
+struct SpectrumLevels: RandomAccessCollection, MutableCollection, Equatable {
+    typealias Index = Int
+
+    private var storage: SIMD64<Float>
+
+    init(repeating value: Float = 0) {
+        storage = SIMD64<Float>(repeating: value)
+    }
+
+    init(_ values: [Float]) {
+        self.init()
+        for (index, value) in values.prefix(64).enumerated() {
+            storage[index] = value
+        }
+    }
+
+    var startIndex: Int { 0 }
+    var endIndex: Int { 64 }
+
+    subscript(position: Int) -> Float {
+        get { storage[position] }
+        set { storage[position] = newValue }
+    }
+}
+
 struct SpectrumAnalysis {
-    let levels: [Float]
+    let levels: SpectrumLevels
     let leftPeak: Float
     let rightPeak: Float
     let peakLevel: Float
@@ -123,7 +148,7 @@ final class SpectrumAnalyzer {
         }
 
         return SpectrumAnalysis(
-            levels: smoothedLevels,
+            levels: SpectrumLevels(smoothedLevels),
             leftPeak: leftPeak,
             rightPeak: rightPeak,
             peakLevel: peakLevel,
@@ -190,7 +215,7 @@ final class SpectrumAnalyzer {
         previousLevels = [Float](repeating: 0.0, count: Self.barCount)
         smoothedLevels = [Float](repeating: 0.0, count: Self.barCount)
         return SpectrumAnalysis(
-            levels: smoothedLevels,
+            levels: SpectrumLevels(smoothedLevels),
             leftPeak: 0.0,
             rightPeak: 0.0,
             peakLevel: 0.0,
@@ -262,7 +287,7 @@ final class SpectrumAnalyzer {
 
         let peakLevel = max(leftPeak, rightPeak)
         return SpectrumAnalysis(
-            levels: smoothedLevels,
+            levels: SpectrumLevels(smoothedLevels),
             leftPeak: leftPeak,
             rightPeak: rightPeak,
             peakLevel: peakLevel,
