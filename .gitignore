@@ -8,6 +8,11 @@ DerivedData/
 *.dSYM
 Pods/
 
+# Local release artifacts
+build/
+dist/
+*.dmg
+
 # Swift Package Manager
 .build/
 Package.resolved

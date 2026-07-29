@@ -64,11 +64,19 @@ SwiftUI Views → OpenEQViewModel → AudioEngineController   (local files)
 
 See [docs/architecture.md](docs/architecture.md), [docs/ROADMAP.md](docs/ROADMAP.md).
 
+## Install (DMG)
+
+1. Download **`OpenEQ-1.0.0.dmg`** from [Releases](https://github.com/oznksc/OpenEQ/releases).
+2. Open the DMG and drag **OpenEQ** into **Applications**.
+3. Launch from Applications. If Gatekeeper blocks the app, use **right-click → Open** (or allow it under **Privacy & Security**).
+
+Full notes and permission setup: [CHANGELOG.md](CHANGELOG.md).
+
 ## Requirements
 
 - macOS **14.0+** (local EQ)
 - macOS **14.2+** (system-wide EQ)
-- Xcode 15+ (or matching command-line tools)
+- Xcode 15+ (or matching command-line tools) to build from source
 
 ## Build
 
@@ -79,7 +87,14 @@ open OpenEQ.xcodeproj   # scheme OpenEQ → My Mac → ⌘R
 # CLI
 xcodebuild -project OpenEQ.xcodeproj -scheme OpenEQ -destination 'platform=macOS' build
 xcodebuild test -project OpenEQ.xcodeproj -scheme OpenEQ -destination 'platform=macOS'
+
+# Release DMG → dist/OpenEQ-<version>.dmg
+./scripts/build-dmg.sh
 ```
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md).
 
 ## Contributing
 
