@@ -26,6 +26,10 @@ final class SystemAudioManager {
     private(set) var didTripFeedbackProtection = false
     /// True when system EQ should resume after wake / recovery.
     private(set) var prefersSystemEQRunning = false
+    private(set) var isReceivingTapAudio = false
+    private(set) var systemEQSetupDetail: String?
+    /// Third-party HAL plugins that commonly break process taps / aggregates.
+    private(set) var conflictingHALPluginNames: [String] = []
 
     var onPhysicalOutputChanged: ((String?, String?) -> Void)?
     var onSafetyTrip: (() -> Void)?
@@ -77,6 +81,18 @@ final class SystemAudioManager {
         }
         refreshDevices()
         startSleepWakeObservers()
+        conflictingHALPluginNames = Self.detectConflictingHALPlugins()
+    }
+
+    static func detectConflictingHALPlugins() -> [String] {
+        let dir = "/Library/Audio/Plug-Ins/HAL"
+        guard let contents = try? FileManager.default.contentsOfDirectory(atPath: dir) else {
+            return []
+        }
+        let suspects = ["Boom", "DeskFx", "Hear", "SoundSiphon", "Audio Hijack"]
+        return contents.filter { name in
+            suspects.contains { name.localizedCaseInsensitiveContains($0) }
+        }
     }
 
     func setMode(_ mode: SystemAudioMode) {
@@ -151,10 +167,19 @@ final class SystemAudioManager {
         systemAudioLatency = systemAudioEQEngine.latencyEstimate
         activePhysicalOutputUID = systemAudioEQEngine.physicalOutputUID
         activePhysicalOutputName = systemAudioEQEngine.physicalOutputName
+        isReceivingTapAudio = systemAudioEQEngine.isReceivingTapAudio
+        systemEQSetupDetail = systemAudioEQEngine.lastSetupDetail
         didTripFeedbackProtection = false
         status = systemAudioEQEngine.status
         if status != .running {
             prefersSystemEQRunning = false
+        }
+
+        // Refresh health flags shortly after start (engine schedules its own probe).
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.7) { [weak self] in
+            guard let self else { return }
+            self.isReceivingTapAudio = self.systemAudioEQEngine.isReceivingTapAudio
+            self.systemEQSetupDetail = self.systemAudioEQEngine.lastSetupDetail
         }
     }
 

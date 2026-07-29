@@ -154,6 +154,9 @@ final class OpenEQViewModel {
     var headphoneProfiles: [HeadphoneProfile] = []
     var calibrationImportMessage: String?
     var channelLayout: ChannelLayout = .stereo
+    var systemEQSetupDetail: String?
+    var isReceivingTapAudio = false
+    var conflictingHALPlugins: [String] = []
 
     var playbackDuration: TimeInterval {
         audioEngineController.playbackDuration
@@ -230,6 +233,7 @@ final class OpenEQViewModel {
         self.systemAudioManager.onSafetyTrip = { [weak self] in
             self?.handleSafetyTrip()
         }
+        self.conflictingHALPlugins = systemAudioManager.conflictingHALPluginNames
     }
 
     /// Called once from the app root after the UI is ready.
@@ -345,15 +349,23 @@ final class OpenEQViewModel {
         systemAudioManager.startSystemEQ(preset: currentActivePreset())
         syncSystemAudioState()
         applyDeviceProfileIfNeeded(forUID: systemAudioManager.activePhysicalOutputUID)
+        systemEQSetupDetail = systemAudioManager.systemEQSetupDetail
+        isReceivingTapAudio = systemAudioManager.isReceivingTapAudio
+        conflictingHALPlugins = systemAudioManager.conflictingHALPluginNames
 
         if case .failed(let message) = systemAudioStatus {
             errorMessage = message
+            isShowingSystemAudio = true
         } else if systemAudioStatus == .permissionRequired {
             errorMessage = "Grant Screen & System Audio Recording permission, then try again."
             isShowingSystemAudio = true
         } else {
             errorMessage = nil
             completeSystemEQOnboardingIfNeeded()
+            // Pull health probe result after engine settles.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) { [weak self] in
+                self?.syncSystemAudioState()
+            }
         }
     }
 
@@ -992,6 +1004,9 @@ final class OpenEQViewModel {
         activePhysicalOutputUID = systemAudioManager.activePhysicalOutputUID
         activePhysicalOutputName = systemAudioManager.activePhysicalOutputName
         didTripFeedbackProtection = systemAudioManager.didTripFeedbackProtection
+        isReceivingTapAudio = systemAudioManager.isReceivingTapAudio
+        systemEQSetupDetail = systemAudioManager.systemEQSetupDetail
+        conflictingHALPlugins = systemAudioManager.conflictingHALPluginNames
     }
 
     private func updateExternalLoopbackEQIfNeeded() {

@@ -41,7 +41,7 @@ struct SystemAudioView: View {
 
     private var header: some View {
         HStack {
-            Label("System Audio", systemImage: "speaker.wave.2.badge.gearshape")
+            Label("System Audio", systemImage: "speaker.wave.2.circle")
                 .font(.title3.weight(.semibold))
             Spacer()
             Button("Done") { viewModel.isShowingSystemAudio = false }
@@ -116,6 +116,27 @@ struct SystemAudioView: View {
                 permissionRecoveryPanel
             }
 
+            if !viewModel.conflictingHALPlugins.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Label(
+                        "Conflicting audio drivers detected",
+                        systemImage: "exclamationmark.triangle.fill"
+                    )
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.orange)
+                    Text(viewModel.conflictingHALPlugins.joined(separator: ", "))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Text("Boom / DeskFx HAL plugins often break process taps (empty spectrum, no sound). Quit or uninstall them, then restart OpenEQ.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(10)
+                .background(Color.orange.opacity(0.1))
+                .cornerRadius(6)
+            }
+
             HStack {
                 Label("Latency", systemImage: "timer")
                     .font(.caption2)
@@ -124,6 +145,25 @@ struct SystemAudioView: View {
                 Text(latencyText)
                     .font(.caption2.monospacedDigit())
                     .foregroundStyle(.secondary)
+            }
+
+            if viewModel.isSystemEQActive {
+                HStack {
+                    Label(
+                        viewModel.isReceivingTapAudio ? "Tap signal: yes" : "Tap signal: waiting…",
+                        systemImage: viewModel.isReceivingTapAudio ? "waveform" : "waveform.slash"
+                    )
+                    .font(.caption2)
+                    .foregroundStyle(viewModel.isReceivingTapAudio ? .green : .orange)
+                    Spacer()
+                }
+            }
+
+            if let detail = viewModel.systemEQSetupDetail {
+                Text(detail)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             if let device = viewModel.activePhysicalOutputName {
