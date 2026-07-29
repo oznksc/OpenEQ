@@ -13,9 +13,7 @@ final class SystemAudioEQEngine {
 
     var onAnalysis: ((SpectrumAnalysis) -> Void)?
     var onStatusChanged: ((SystemAudioStatus) -> Void)?
-    /// Fired once when feedback protection mutes output to prevent hearing damage.
     var onSafetyTrip: (() -> Void)?
-    /// Fired after a successful rebuild onto a new physical device.
     var onPhysicalOutputChanged: ((String?, String?) -> Void)?
 
     private let analyzer = SpectrumAnalyzer()
@@ -29,11 +27,15 @@ final class SystemAudioEQEngine {
     private var isRunning = false
     private var isRebuilding = false
     private var sampleRate: Double = 48000
+    private var channelCount: UInt32 = 2
     private let dspState = SystemAudioDSPState()
     private var feedbackGuard = FeedbackGuard()
     private var safetyTripNotified = false
     private var feedbackProtectionEnabled = true
     private var isObservingDefaultOutput = false
+    /// Scratch for interleaved ↔ non-interleaved conversion (audio thread only).
+    private var deinterleaveScratch: [UnsafeMutablePointer<Float>?] = [nil, nil]
+    private var deinterleaveCapacity: Int = 0
     private lazy var defaultOutputListener: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
         self?.handleDefaultOutputChanged()
     }
@@ -41,6 +43,7 @@ final class SystemAudioEQEngine {
     deinit {
         stopObservingDefaultOutput()
         stop()
+        freeScratch()
     }
 
     func start(with preset: EQPreset) {
@@ -50,6 +53,10 @@ final class SystemAudioEQEngine {
         }
         stop()
         do {
+            // Keep the user's physical device as system default.
+            // Process-tap mute silences apps on that device; our aggregate IOProc
+            // plays the processed tap audio back through the same speakers.
+            // Setting default output to the aggregate is a common cause of total silence.
             physicalOutputID = try getDefaultOutputDeviceID()
             refreshPhysicalOutputMetadata()
             try setupTap()
@@ -61,15 +68,16 @@ final class SystemAudioEQEngine {
                 dspState.isEmergencyMuted = false
             }
             try setupAggregateWithOutput()
-            try setDefaultOutput(aggDeviceID)
             try startAggIO()
             startObservingDefaultOutput()
             isRunning = true
             latencyEstimate = estimateLatency()
             publishStatus(.running)
-            logger.info("System-wide EQ started on aggregate device")
+            logger.info(
+                "System-wide EQ started (tap muted → aggregate IO → \(physicalOutputName ?? "output"), rate \(sampleRate))"
+            )
         } catch {
-            cleanup(restoreOutput: true)
+            cleanup()
             let mapped = mapStartError(error)
             publishStatus(mapped)
             logger.error("Start failed: \(mapped.title)")
@@ -78,7 +86,7 @@ final class SystemAudioEQEngine {
 
     func stop() {
         stopObservingDefaultOutput()
-        cleanup(restoreOutput: true)
+        cleanup()
         ioQueue.sync {
             dspState.reset()
             feedbackGuard.reset()
@@ -130,7 +138,6 @@ final class SystemAudioEQEngine {
     }
 
     /// Rebuild when the user switches physical output (headphones, AirPods, etc.).
-    /// Never treats our own aggregate device as the physical destination.
     func rebuildAggregateWithCurrentOutput() {
         guard isRunning, tapID != kAudioObjectUnknown, !isRebuilding else { return }
 
@@ -142,22 +149,19 @@ final class SystemAudioEQEngine {
             return
         }
 
-        // Default is still our engine — nothing to do.
+        // Ignore our private aggregate if it somehow became default (legacy bug recovery).
         if currentDefault == aggDeviceID {
-            return
-        }
-
-        // Some event restored the previous physical device as default; reclaim it.
-        if currentDefault == physicalOutputID {
-            do {
-                try setDefaultOutput(aggDeviceID)
-            } catch {
-                logger.error("Failed to re-claim default output: \(error.localizedDescription)")
+            if physicalOutputID != kAudioObjectUnknown {
+                try? setDefaultOutput(physicalOutputID)
             }
             return
         }
 
-        // User selected a new physical output device.
+        // Same physical device — nothing to rebuild.
+        if currentDefault == physicalOutputID {
+            return
+        }
+
         isRebuilding = true
         logger.info("Rebuilding aggregate for new physical output \(currentDefault)")
 
@@ -168,17 +172,16 @@ final class SystemAudioEQEngine {
             physicalOutputID = currentDefault
             refreshPhysicalOutputMetadata()
             try setupAggregateWithOutput()
-            try setDefaultOutput(aggDeviceID)
             try startAggIO()
             latencyEstimate = estimateLatency()
             isRebuilding = false
             publishStatus(.running)
             onPhysicalOutputChanged?(physicalOutputUID, physicalOutputName)
-            logger.info("Aggregate device rebuilt with new output")
+            logger.info("Aggregate device rebuilt with new output \(physicalOutputName ?? "?")")
         } catch {
             isRebuilding = false
             logger.error("Rebuild failed: \(error.localizedDescription)")
-            cleanup(restoreOutput: true)
+            cleanup()
             isRunning = false
             latencyEstimate = nil
             publishStatus(.failed("Device change failed: \(error.localizedDescription)"))
@@ -189,6 +192,8 @@ final class SystemAudioEQEngine {
 
     @available(macOS 14.2, *)
     private func setupTap() throws {
+        // Mute tapped processes at their destination (physical default) so we do not
+        // hear dry + wet. Processed audio is played via the aggregate IOProc instead.
         let desc = CATapDescription(stereoGlobalTapButExcludeProcesses: [])
         desc.name = "OpenEQ System Audio"
         desc.isPrivate = true
@@ -200,8 +205,13 @@ final class SystemAudioEQEngine {
             throw SystemAudioEQError.tapCreateFailed(err)
         }
         tapID = newTapID
-        sampleRate = try getTapFormat().mSampleRate
-        logger.info("Tap created, rate: \(sampleRate)")
+
+        let tapFormat = try getTapFormat()
+        sampleRate = tapFormat.mSampleRate > 0 ? tapFormat.mSampleRate : 48_000
+        channelCount = max(1, tapFormat.mChannelsPerFrame)
+        logger.info(
+            "Tap created, rate: \(sampleRate), channels: \(channelCount), flags: \(tapFormat.mFormatFlags)"
+        )
     }
 
     private func setupAggregateWithOutput() throws {
@@ -213,41 +223,63 @@ final class SystemAudioEQEngine {
         let tapUID = try getTapUID()
         let aggUID = "com.openeq.agg.\(UUID().uuidString)"
 
-        let subDevices = [[kAudioSubDeviceUIDKey: outputUID]]
+        // Physical device is the only output subdevice and the clock master.
+        // Process tap is attached as a tap source (input streams on the aggregate).
+        let subDevices: [[String: Any]] = [
+            [
+                kAudioSubDeviceUIDKey: outputUID,
+                kAudioSubDeviceInputChannelsKey: 0,
+                // Prefer full duplex channel use from the physical device as output.
+            ]
+        ]
+
         let desc: [String: Any] = [
             kAudioAggregateDeviceNameKey: "OpenEQ Engine",
             kAudioAggregateDeviceUIDKey: aggUID,
             kAudioAggregateDeviceIsPrivateKey: true,
+            kAudioAggregateDeviceMainSubDeviceKey: outputUID,
             kAudioAggregateDeviceSubDeviceListKey: subDevices,
         ]
 
         var newAggID = AudioObjectID(kAudioObjectUnknown)
-        var err = AudioHardwareCreateAggregateDevice(desc as CFDictionary, &newAggID)
+        let err = AudioHardwareCreateAggregateDevice(desc as CFDictionary, &newAggID)
         guard err == noErr else { throw SystemAudioEQError.failed("Create aggregate: \(err)") }
         aggDeviceID = newAggID
+        // Attach process tap after create (array of tap UIDs) — most reliable path.
+        try setTapList(tapUID)
 
+        // Align aggregate sample rate with the tap / physical device when possible.
+        try? setDeviceSampleRate(aggDeviceID, sampleRate)
+
+        logger.info("Aggregate created with physical output \(outputUID) + tap")
+    }
+
+    private func setTapList(_ tapUID: CFString) throws {
         var addr = AudioObjectPropertyAddress(
             mSelector: kAudioAggregateDevicePropertyTapList,
             mScope: kAudioObjectPropertyScopeGlobal,
             mElement: kAudioObjectPropertyElementMain
         )
         var list: CFArray? = [tapUID] as CFArray
-        err = withUnsafeMutablePointer(to: &list) { ptr in
-            AudioObjectSetPropertyData(aggDeviceID, &addr, UInt32(0), nil, UInt32(MemoryLayout<CFArray>.size), ptr)
+        let err = withUnsafeMutablePointer(to: &list) { ptr in
+            AudioObjectSetPropertyData(
+                aggDeviceID,
+                &addr,
+                UInt32(0),
+                nil,
+                UInt32(MemoryLayout<CFArray>.size),
+                ptr
+            )
         }
         guard err == noErr else { throw SystemAudioEQError.failed("Set tap list: \(err)") }
-
-        logger.info("Aggregate device created with output + tap")
     }
 
     private func startAggIO() throws {
-        let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 2)!
-
         var procID: AudioDeviceIOProcID?
         let err = AudioDeviceCreateIOProcIDWithBlock(&procID, aggDeviceID, ioQueue) {
             [weak self] (_, inInputData, _, outOutputData, _) in
             guard let self else { return }
-            self.handleIO(inData: inInputData, outData: outOutputData, format: format)
+            self.handleIO(inData: inInputData, outData: outOutputData)
         }
         guard err == noErr, let procID else {
             throw SystemAudioEQError.failed("Create IOProc: \(err)")
@@ -265,27 +297,63 @@ final class SystemAudioEQEngine {
 
     private func handleIO(
         inData: UnsafePointer<AudioBufferList>,
-        outData: UnsafeMutablePointer<AudioBufferList>,
-        format: AVAudioFormat
+        outData: UnsafeMutablePointer<AudioBufferList>
     ) {
         let inBuffers = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: inData))
         let outBuffers = UnsafeMutableAudioBufferListPointer(outData)
-        let channelCount = Int(format.channelCount)
 
         for buffer in outBuffers {
             guard let data = buffer.mData, buffer.mDataByteSize > 0 else { continue }
             memset(data, 0, Int(buffer.mDataByteSize))
         }
 
-        guard let firstInput = inBuffers.first,
-              firstInput.mData != nil,
-              firstInput.mDataByteSize > 0 else {
+        guard !inBuffers.isEmpty,
+              let firstIn = inBuffers.first,
+              firstIn.mData != nil,
+              firstIn.mDataByteSize > 0 else {
             return
         }
 
-        let activeChannels = min(inBuffers.count, outBuffers.count, channelCount)
+        let inNonInterleaved = isNonInterleaved(inBuffers)
+        let outNonInterleaved = isNonInterleaved(outBuffers)
+
+        if inNonInterleaved && outNonInterleaved {
+            processNonInterleaved(inBuffers: inBuffers, outBuffers: outBuffers)
+        } else if !inNonInterleaved && !outNonInterleaved {
+            processInterleaved(inBuffers: inBuffers, outBuffers: outBuffers)
+        } else if inNonInterleaved && !outNonInterleaved {
+            processNonInterleavedToInterleaved(inBuffers: inBuffers, outBuffers: outBuffers)
+        } else {
+            processInterleavedToNonInterleaved(inBuffers: inBuffers, outBuffers: outBuffers)
+        }
+
+        // Spectrum (best-effort, post-fill).
+        if let outFirst = outBuffers.first,
+           outFirst.mData != nil,
+           outFirst.mDataByteSize > 0 {
+            let channels = max(1, Int(outFirst.mNumberChannels))
+            let frames = Int(outFirst.mDataByteSize) / (MemoryLayout<Float>.size * (outNonInterleaved ? 1 : channels))
+            if frames > 0,
+               let analysis = analyzer.analyze(bufferList: outData, frameLength: frames, sampleRate: sampleRate) {
+                DispatchQueue.main.async { [weak self] in self?.onAnalysis?(analysis) }
+            }
+        }
+    }
+
+    private func isNonInterleaved(_ buffers: UnsafeMutableAudioBufferListPointer) -> Bool {
+        if buffers.count > 1 { return true }
+        guard let first = buffers.first else { return true }
+        return first.mNumberChannels <= 1
+    }
+
+    private func processNonInterleaved(
+        inBuffers: UnsafeMutableAudioBufferListPointer,
+        outBuffers: UnsafeMutableAudioBufferListPointer
+    ) {
+        let channels = min(inBuffers.count, outBuffers.count, max(1, Int(channelCount)))
         var primaryFrames = 0
-        for channel in 0..<activeChannels {
+
+        for channel in 0..<channels {
             guard let inputData = inBuffers[channel].mData,
                   let outputData = outBuffers[channel].mData else { continue }
             let copyBytes = min(inBuffers[channel].mDataByteSize, outBuffers[channel].mDataByteSize)
@@ -296,53 +364,176 @@ final class SystemAudioEQEngine {
             let destination = outputData.assumingMemoryBound(to: Float.self)
             memcpy(destination, source, Int(copyBytes))
             dspState.process(destination, frames: frames, channel: channel)
-            if channel == 0 {
-                primaryFrames = frames
+            if channel == 0 { primaryFrames = frames }
+        }
+
+        applyFeedbackGuard(outBuffers: outBuffers, nonInterleaved: true, frames: primaryFrames)
+    }
+
+    private func processInterleaved(
+        inBuffers: UnsafeMutableAudioBufferListPointer,
+        outBuffers: UnsafeMutableAudioBufferListPointer
+    ) {
+        guard let inData = inBuffers.first?.mData,
+              let outData = outBuffers.first?.mData else { return }
+
+        let inChannels = max(1, Int(inBuffers[0].mNumberChannels))
+        let outChannels = max(1, Int(outBuffers[0].mNumberChannels))
+        let channels = min(inChannels, outChannels, 2)
+        let inFrames = Int(inBuffers[0].mDataByteSize) / (MemoryLayout<Float>.size * inChannels)
+        let outFrames = Int(outBuffers[0].mDataByteSize) / (MemoryLayout<Float>.size * outChannels)
+        let frames = min(inFrames, outFrames)
+        guard frames > 0 else { return }
+
+        ensureScratch(frames: frames, channels: channels)
+        let source = inData.assumingMemoryBound(to: Float.self)
+        let destination = outData.assumingMemoryBound(to: Float.self)
+
+        for channel in 0..<channels {
+            guard let scratch = deinterleaveScratch[channel] else { continue }
+            for frame in 0..<frames {
+                scratch[frame] = source[frame * inChannels + channel]
+            }
+            dspState.process(scratch, frames: frames, channel: channel)
+        }
+
+        for channel in 0..<channels {
+            guard let scratch = deinterleaveScratch[channel] else { continue }
+            for frame in 0..<frames {
+                destination[frame * outChannels + channel] = scratch[frame]
             }
         }
 
-        if feedbackProtectionEnabled,
-           !dspState.isEmergencyMuted,
-           primaryFrames > 0,
-           let firstOut = outBuffers.first?.mData {
-            let samples = firstOut.assumingMemoryBound(to: Float.self)
-            if feedbackGuard.evaluate(samples: samples, frames: primaryFrames) {
-                dspState.isEmergencyMuted = true
-                // Zero all channels immediately.
-                for buffer in outBuffers {
-                    guard let data = buffer.mData, buffer.mDataByteSize > 0 else { continue }
-                    memset(data, 0, Int(buffer.mDataByteSize))
-                }
-                if !safetyTripNotified {
-                    safetyTripNotified = true
-                    DispatchQueue.main.async { [weak self] in
-                        self?.didTripFeedbackProtection = true
-                        self?.onSafetyTrip?()
-                    }
-                }
-            }
-        } else if dspState.isEmergencyMuted {
-            for buffer in outBuffers {
-                guard let data = buffer.mData, buffer.mDataByteSize > 0 else { continue }
-                memset(data, 0, Int(buffer.mDataByteSize))
+        applyFeedbackGuard(outBuffers: outBuffers, nonInterleaved: false, frames: frames)
+    }
+
+    private func processNonInterleavedToInterleaved(
+        inBuffers: UnsafeMutableAudioBufferListPointer,
+        outBuffers: UnsafeMutableAudioBufferListPointer
+    ) {
+        guard let outData = outBuffers.first?.mData else { return }
+        let outChannels = max(1, Int(outBuffers[0].mNumberChannels))
+        let channels = min(inBuffers.count, outChannels, 2)
+        let frames = Int(inBuffers[0].mDataByteSize) / MemoryLayout<Float>.size
+        let outFrames = Int(outBuffers[0].mDataByteSize) / (MemoryLayout<Float>.size * outChannels)
+        let n = min(frames, outFrames)
+        guard n > 0 else { return }
+
+        ensureScratch(frames: n, channels: channels)
+        let destination = outData.assumingMemoryBound(to: Float.self)
+
+        for channel in 0..<channels {
+            guard let inputData = inBuffers[channel].mData,
+                  let scratch = deinterleaveScratch[channel] else { continue }
+            memcpy(scratch, inputData, n * MemoryLayout<Float>.size)
+            dspState.process(scratch, frames: n, channel: channel)
+        }
+
+        for channel in 0..<channels {
+            guard let scratch = deinterleaveScratch[channel] else { continue }
+            for frame in 0..<n {
+                destination[frame * outChannels + channel] = scratch[frame]
             }
         }
 
-        // Analyze post-EQ output so spectrum matches what the user hears.
-        let analysisFrames = Int(outBuffers.first?.mDataByteSize ?? 0) / MemoryLayout<Float>.size
-        if analysisFrames > 0,
-           let analysis = analyzer.analyze(bufferList: outData, frameLength: analysisFrames, sampleRate: sampleRate) {
-            DispatchQueue.main.async { [weak self] in self?.onAnalysis?(analysis) }
+        applyFeedbackGuard(outBuffers: outBuffers, nonInterleaved: false, frames: n)
+    }
+
+    private func processInterleavedToNonInterleaved(
+        inBuffers: UnsafeMutableAudioBufferListPointer,
+        outBuffers: UnsafeMutableAudioBufferListPointer
+    ) {
+        guard let inData = inBuffers.first?.mData else { return }
+        let inChannels = max(1, Int(inBuffers[0].mNumberChannels))
+        let channels = min(outBuffers.count, inChannels, 2)
+        let frames = Int(inBuffers[0].mDataByteSize) / (MemoryLayout<Float>.size * inChannels)
+        guard frames > 0 else { return }
+
+        let source = inData.assumingMemoryBound(to: Float.self)
+        for channel in 0..<channels {
+            guard let outputData = outBuffers[channel].mData else { continue }
+            let outFrames = Int(outBuffers[channel].mDataByteSize) / MemoryLayout<Float>.size
+            let n = min(frames, outFrames)
+            let destination = outputData.assumingMemoryBound(to: Float.self)
+            for frame in 0..<n {
+                destination[frame] = source[frame * inChannels + channel]
+            }
+            dspState.process(destination, frames: n, channel: channel)
         }
+
+        let primaryFrames = Int(outBuffers.first?.mDataByteSize ?? 0) / MemoryLayout<Float>.size
+        applyFeedbackGuard(outBuffers: outBuffers, nonInterleaved: true, frames: primaryFrames)
+    }
+
+    private func applyFeedbackGuard(
+        outBuffers: UnsafeMutableAudioBufferListPointer,
+        nonInterleaved: Bool,
+        frames: Int
+    ) {
+        guard feedbackProtectionEnabled, frames > 0 else {
+            if dspState.isEmergencyMuted {
+                silence(outBuffers)
+            }
+            return
+        }
+
+        if dspState.isEmergencyMuted {
+            silence(outBuffers)
+            return
+        }
+
+        guard let first = outBuffers.first?.mData else { return }
+        let samples = first.assumingMemoryBound(to: Float.self)
+        let evalFrames: Int
+        if nonInterleaved {
+            evalFrames = frames
+        } else {
+            let ch = max(1, Int(outBuffers[0].mNumberChannels))
+            evalFrames = frames * ch
+        }
+
+        if feedbackGuard.evaluate(samples: samples, frames: min(evalFrames, frames)) {
+            dspState.isEmergencyMuted = true
+            silence(outBuffers)
+            if !safetyTripNotified {
+                safetyTripNotified = true
+                DispatchQueue.main.async { [weak self] in
+                    self?.didTripFeedbackProtection = true
+                    self?.onSafetyTrip?()
+                }
+            }
+        }
+    }
+
+    private func silence(_ outBuffers: UnsafeMutableAudioBufferListPointer) {
+        for buffer in outBuffers {
+            guard let data = buffer.mData, buffer.mDataByteSize > 0 else { continue }
+            memset(data, 0, Int(buffer.mDataByteSize))
+        }
+    }
+
+    private func ensureScratch(frames: Int, channels: Int) {
+        if frames <= deinterleaveCapacity, deinterleaveScratch[0] != nil { return }
+        freeScratch()
+        deinterleaveCapacity = max(frames, 2048)
+        for channel in 0..<min(channels, 2) {
+            deinterleaveScratch[channel] = .allocate(capacity: deinterleaveCapacity)
+        }
+    }
+
+    private func freeScratch() {
+        for index in deinterleaveScratch.indices {
+            deinterleaveScratch[index]?.deallocate()
+            deinterleaveScratch[index] = nil
+        }
+        deinterleaveCapacity = 0
     }
 
     // MARK: - Default output observation
 
     private func handleDefaultOutputChanged() {
         guard isRunning, !isRebuilding else { return }
-        // Debounce rapid Core Audio churn (Bluetooth hops, sleep/wake).
         ioQueue.async { [weak self] in
-            // Hop back for property access + rebuild coordination.
             DispatchQueue.main.async {
                 self?.rebuildAggregateWithCurrentOutput()
             }
@@ -390,7 +581,6 @@ final class SystemAudioEQEngine {
     // MARK: - Helpers
 
     private func estimateLatency() -> TimeInterval {
-        // Tap buffer + aggregate IO + small safety margin.
         Double(1024) / max(sampleRate, 1) * 3
     }
 
@@ -428,7 +618,6 @@ final class SystemAudioEQEngine {
         if let eqError = error as? SystemAudioEQError {
             switch eqError {
             case .tapCreateFailed(let code):
-                // Permission denials and privacy blocks typically surface as non-zero OSStatus.
                 if code == -1 || code == kAudioHardwareIllegalOperationError || code == kAudioHardwareNotRunningError {
                     return .permissionRequired
                 }
@@ -530,6 +719,26 @@ final class SystemAudioEQEngine {
         guard err == noErr else { throw SystemAudioEQError.failed("Set default output: \(err)") }
     }
 
+    private func setDeviceSampleRate(_ deviceID: AudioDeviceID, _ rate: Double) throws {
+        var addr = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyNominalSampleRate,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var value = Float64(rate)
+        let err = AudioObjectSetPropertyData(
+            deviceID,
+            &addr,
+            0,
+            nil,
+            UInt32(MemoryLayout<Float64>.size),
+            &value
+        )
+        if err != noErr {
+            logger.warning("Could not set aggregate sample rate to \(rate): \(err)")
+        }
+    }
+
     // MARK: - Cleanup
 
     private func stopAggIO() {
@@ -554,8 +763,11 @@ final class SystemAudioEQEngine {
         }
     }
 
-    private func cleanup(restoreOutput: Bool = false) {
-        if restoreOutput, physicalOutputID != kAudioObjectUnknown {
+    private func cleanup() {
+        // Recover if a previous buggy build left our aggregate as the system default.
+        if let defaultID = try? getDefaultOutputDeviceID(),
+           defaultID == aggDeviceID,
+           physicalOutputID != kAudioObjectUnknown {
             try? setDefaultOutput(physicalOutputID)
         }
         stopAggIO()
@@ -678,7 +890,6 @@ private struct BiquadState {
     var y2: Float = 0
 }
 
-/// Shared peak-limiter constants for system-wide DSP (keeps headroom after EQ boosts).
 enum SystemAudioLimiter {
     static let ceiling: Float = 0.98
     static let attack: Float = 0.35
@@ -735,7 +946,6 @@ private final class SystemAudioDSPState {
         }
         guard !isBypassed else { return }
 
-        // Smooth preamp so large fader jumps don't click.
         if channel == 0 {
             let preampDelta = targetPreampLinear - preampLinear
             if abs(preampDelta) > 0.00001 {
