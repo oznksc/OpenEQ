@@ -454,10 +454,11 @@ final class OpenEQViewModel {
 
     private func handleSafetyTrip() {
         didTripFeedbackProtection = true
-        isEnabled = false
-        safetyBannerMessage = "Feedback protection muted output. Check routing, then resume."
-        errorMessage = safetyBannerMessage
+        // Do not flip global EQ bypass — that made recovery confusing and looked like a total failure.
+        safetyBannerMessage = "Feedback protection muted output after sustained clipping. Lower gain or check routing, then resume."
+        errorMessage = nil
         syncSystemAudioState()
+        isShowingSystemAudio = true
     }
 
     private func applyDeviceProfileIfNeeded(forUID uid: String?) {

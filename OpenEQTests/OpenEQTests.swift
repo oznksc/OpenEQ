@@ -412,19 +412,30 @@ final class OpenEQTests: XCTestCase {
 
     // MARK: - Phase 2
 
-    func testFeedbackGuardDoesNotTripOnShortPeaks() {
+    func testFeedbackGuardGracePeriodIgnoresHotSignal() {
         var guardState = FeedbackGuard()
-        for _ in 0..<5 {
-            XCTAssertFalse(guardState.evaluate(peak: 1.0, rms: 0.9))
+        for _ in 0..<FeedbackGuard.graceWindowCount {
+            XCTAssertFalse(guardState.evaluate(peak: 1.0, rms: 0.95))
         }
         XCTAssertFalse(guardState.isTripped)
     }
 
-    func testFeedbackGuardTripsOnSustainedHotSignal() {
+    func testFeedbackGuardDoesNotTripOnLoudButLimitedMusic() {
+        var guardState = FeedbackGuard()
+        // Peak limiter ceiling is 0.98 — this is normal loud program material.
+        let total = FeedbackGuard.graceWindowCount + FeedbackGuard.tripWindowCount + 20
+        for _ in 0..<total {
+            XCTAssertFalse(guardState.evaluate(peak: 0.98, rms: 0.55))
+        }
+        XCTAssertFalse(guardState.isTripped)
+    }
+
+    func testFeedbackGuardTripsOnSustainedHardClip() {
         var guardState = FeedbackGuard()
         var tripped = false
-        for _ in 0..<(FeedbackGuard.tripWindowCount + 2) {
-            if guardState.evaluate(peak: 0.99, rms: 0.5) {
+        let total = FeedbackGuard.graceWindowCount + FeedbackGuard.tripWindowCount + 5
+        for _ in 0..<total {
+            if guardState.evaluate(peak: 1.0, rms: 0.85) {
                 tripped = true
                 break
             }
@@ -440,11 +451,13 @@ final class OpenEQTests: XCTestCase {
 
     func testFeedbackGuardCoolsDown() {
         var guardState = FeedbackGuard()
-        for _ in 0..<10 {
-            _ = guardState.evaluate(peak: 0.99, rms: 0.5)
+        // Exit grace, then heat up a bit without tripping.
+        for _ in 0..<(FeedbackGuard.graceWindowCount + 30) {
+            _ = guardState.evaluate(peak: 1.0, rms: 0.9)
         }
         XCTAssertGreaterThan(guardState.hotWindows, 0)
-        for _ in 0..<20 {
+        XCTAssertFalse(guardState.isTripped)
+        for _ in 0..<40 {
             _ = guardState.evaluate(peak: 0.2, rms: 0.05)
         }
         XCTAssertEqual(guardState.hotWindows, 0)

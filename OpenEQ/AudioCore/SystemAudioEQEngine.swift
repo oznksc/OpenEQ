@@ -470,33 +470,32 @@ final class SystemAudioEQEngine {
         nonInterleaved: Bool,
         frames: Int
     ) {
-        guard feedbackProtectionEnabled, frames > 0 else {
-            if dspState.isEmergencyMuted {
-                silence(outBuffers)
-            }
-            return
-        }
-
         if dspState.isEmergencyMuted {
             silence(outBuffers)
             return
         }
 
+        guard feedbackProtectionEnabled, frames > 0 else { return }
         guard let first = outBuffers.first?.mData else { return }
+
+        // Always score a single channel (or interleaved stream length = frames * channels
+        // only when truly interleaved). Using min(evalFrames, frames) previously hid bugs
+        // and still allowed loud program material to false-trip.
         let samples = first.assumingMemoryBound(to: Float.self)
-        let evalFrames: Int
+        let sampleCount: Int
         if nonInterleaved {
-            evalFrames = frames
+            sampleCount = frames
         } else {
-            let ch = max(1, Int(outBuffers[0].mNumberChannels))
-            evalFrames = frames * ch
+            let channels = max(1, Int(outBuffers[0].mNumberChannels))
+            sampleCount = frames * channels
         }
 
-        if feedbackGuard.evaluate(samples: samples, frames: min(evalFrames, frames)) {
+        if feedbackGuard.evaluate(samples: samples, frames: sampleCount) {
             dspState.isEmergencyMuted = true
             silence(outBuffers)
             if !safetyTripNotified {
                 safetyTripNotified = true
+                logger.warning("Feedback protection tripped after sustained hard-clip energy")
                 DispatchQueue.main.async { [weak self] in
                     self?.didTripFeedbackProtection = true
                     self?.onSafetyTrip?()

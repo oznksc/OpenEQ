@@ -1,23 +1,34 @@
 import Foundation
 
-/// Detects sustained near-clip high-energy output that often indicates a
-/// feedback/howling loop and requests an emergency mute within milliseconds.
+/// Detects sustained *digital clipping* that can indicate a feedback/howling loop.
+///
+/// Intentionally conservative: loud music, EQ boosts, and the peak limiter working
+/// near full scale must not trip. We only care about hard-clip-like energy that
+/// persists for multiple seconds after a short startup grace period.
 struct FeedbackGuard: Equatable {
-    /// Peak must stay at/above this fraction of full scale.
-    static let peakThreshold: Float = 0.985
-    /// RMS must stay high so short musical peaks alone do not trip.
-    static let rmsThreshold: Float = 0.42
-    /// Consecutive hot analysis windows required before a trip (~0.5–1s depending on hop).
-    static let tripWindowCount: Int = 36
-    /// Cool-down steps when signal falls back under thresholds.
-    static let coolDownStep: Int = 2
+    /// True digital full-scale territory (limiter ceiling is 0.98 — music should stay below this).
+    static let peakThreshold: Float = 0.999
+    /// Very hot average energy; ordinary program material rarely sustains this with hard peaks.
+    static let rmsThreshold: Float = 0.72
+    /// ~2–4 s at typical Core Audio buffer rates (256–512 frames @ 48 kHz).
+    static let tripWindowCount: Int = 200
+    /// Ignore the first windows after start/reset (device settle, permission, buffer underruns).
+    static let graceWindowCount: Int = 120
+    static let coolDownStep: Int = 4
 
     private(set) var hotWindows: Int = 0
+    private(set) var windowsSeen: Int = 0
     private(set) var isTripped: Bool = false
 
     mutating func evaluate(peak: Float, rms: Float) -> Bool {
         guard !isTripped else { return true }
 
+        windowsSeen += 1
+        if windowsSeen <= Self.graceWindowCount {
+            return false
+        }
+
+        // Require hard clip *and* extreme RMS — not just a limited loud mix.
         if peak >= Self.peakThreshold, rms >= Self.rmsThreshold {
             hotWindows += 1
         } else if hotWindows > 0 {
@@ -39,6 +50,8 @@ struct FeedbackGuard: Equatable {
         var sumSquares: Float = 0
         for index in 0..<frames {
             let sample = samples[index]
+            // Skip non-finite garbage so NaNs cannot trip the guard.
+            guard sample.isFinite else { continue }
             let absolute = abs(sample)
             if absolute > peak { peak = absolute }
             sumSquares += sample * sample
@@ -49,6 +62,7 @@ struct FeedbackGuard: Equatable {
 
     mutating func reset() {
         hotWindows = 0
+        windowsSeen = 0
         isTripped = false
     }
 }

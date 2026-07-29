@@ -299,9 +299,8 @@ final class SystemAudioManager {
     private func handleSafetyTrip() {
         didTripFeedbackProtection = true
         logger.warning("Feedback protection tripped — muting system EQ output")
-        // Immediate hearing safety: bypass EQ and keep mute until user clears.
-        isSystemAudioBypassed = true
-        systemAudioEQEngine.setBypassed(true)
+        // Keep processing graph alive but muted; do not force EQ bypass so the user
+        // can resume with the same curve after acknowledging the warning.
         onSafetyTrip?()
     }
 
@@ -309,9 +308,10 @@ final class SystemAudioManager {
         guard mode == .externalLoopback, status == .running else { return }
         guard AppPreferences.feedbackProtectionEnabled else { return }
 
-        // Approximate RMS from peak for loopback path (analyzer exposes peaks).
-        let rms = max(analysis.leftPeak, analysis.rightPeak) * 0.7
-        if loopbackFeedbackGuard.evaluate(peak: analysis.peakLevel, rms: rms) {
+        // Peak meters are normalized ~0…1; require true clip-like peaks, not loud music.
+        let peak = analysis.peakLevel
+        let rms = max(analysis.leftPeak, analysis.rightPeak) * 0.55
+        if loopbackFeedbackGuard.evaluate(peak: peak, rms: rms) {
             didTripFeedbackProtection = true
             logger.warning("Feedback protection tripped on external loopback")
             externalLoopbackEngine.setBypassed(true)
