@@ -1,6 +1,7 @@
 import AVFoundation
 import CoreAudio
 import Accelerate
+import CoreGraphics
 import Darwin
 
 let kOpenEQSysObj = AudioObjectID(kAudioObjectSystemObject)
@@ -61,6 +62,10 @@ final class SystemAudioEQEngine {
         }
         stop()
         do {
+            // Ensure Screen/System Audio Recording is requested. Do NOT treat every
+            // Core Audio "nope" as a permission failure — that blocks real diagnosis.
+            try ensureScreenCaptureAccess()
+
             physicalOutputID = try getDefaultOutputDeviceID()
             // Never nest our own aggregate as the physical destination.
             if isOpenEQAggregate(physicalOutputID) {
@@ -684,19 +689,40 @@ final class SystemAudioEQEngine {
         if let eqError = error as? SystemAudioEQError {
             switch eqError {
             case .tapCreateFailed(let code):
-                if code == -1 || code == kAudioHardwareIllegalOperationError || code == kAudioHardwareNotRunningError {
+                // Only map narrow cases. kAudioHardwareIllegalOperationError ('nope') is
+                // returned for many non-permission failures (HAL conflicts, bad property sets).
+                if code == Int32(tccDeniedHint) {
                     return .permissionRequired
                 }
-                return .failed(eqError.localizedDescription)
+                return .failed(
+                    "Process tap create failed (OSStatus \(code) / \(fourCC(code))). If permission is already on, check Sound output and remove conflicting HAL plugins."
+                )
             case .failed(let message):
-                if message.localizedCaseInsensitiveContains("permission")
-                    || message.localizedCaseInsensitiveContains("denied") {
+                // Explicit permission probe only — not every message that mentions the word.
+                if message.hasPrefix("PERMISSION:") {
                     return .permissionRequired
                 }
                 return .failed(message)
             }
         }
         return .failed(error.localizedDescription)
+    }
+
+    /// TCC-style denial sometimes surfaces as this value on some systems.
+    private var tccDeniedHint: Int32 { -6700 }
+
+    private func ensureScreenCaptureAccess() throws {
+        // Process taps share Screen & System Audio Recording TCC on modern macOS.
+        if CGPreflightScreenCaptureAccess() {
+            return
+        }
+        let requested = CGRequestScreenCaptureAccess()
+        if requested || CGPreflightScreenCaptureAccess() {
+            return
+        }
+        throw SystemAudioEQError.failed(
+            "PERMISSION: Screen & System Audio Recording is off for OpenEQ. Enable it in System Settings → Privacy & Security, then click Start again."
+        )
     }
 
     private func processObjectID(forPID pid: pid_t) throws -> AudioObjectID {
@@ -949,7 +975,7 @@ enum SystemAudioEQError: LocalizedError {
         case .failed(let message):
             return "System EQ: \(message)"
         case .tapCreateFailed(let code):
-            return "System EQ: Could not create process tap (OSStatus \(code)). Grant Screen & System Audio Recording permission in System Settings."
+            return "System EQ: Process tap create failed (OSStatus \(code))."
         }
     }
 }

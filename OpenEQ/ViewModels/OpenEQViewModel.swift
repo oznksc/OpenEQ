@@ -344,6 +344,7 @@ final class OpenEQViewModel {
 
     func startSystemEQMode() {
         stop()
+        systemAudioManager.clearPermissionBlock()
         systemAudioManager.setSystemAudioBypassed(!isEnabled)
         systemAudioManager.setFeedbackProtectionEnabled(feedbackProtectionEnabled)
         systemAudioManager.startSystemEQ(preset: currentActivePreset())
@@ -354,18 +355,29 @@ final class OpenEQViewModel {
         conflictingHALPlugins = systemAudioManager.conflictingHALPluginNames
 
         if case .failed(let message) = systemAudioStatus {
+            // Real Core Audio / setup error — not a fake permission wall.
             errorMessage = message
+            safetyBannerMessage = message
             isShowingSystemAudio = true
         } else if systemAudioStatus == .permissionRequired {
-            errorMessage = "Grant Screen & System Audio Recording permission, then try again."
+            errorMessage = nil
+            safetyBannerMessage = "Enable Screen & System Audio Recording for this OpenEQ build, then press Start again."
             isShowingSystemAudio = true
         } else {
             errorMessage = nil
+            safetyBannerMessage = nil
             completeSystemEQOnboardingIfNeeded()
-            // Pull health probe result after engine settles.
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) { [weak self] in
                 self?.syncSystemAudioState()
             }
+        }
+    }
+
+    func retrySystemEQAfterPermission() {
+        systemAudioManager.clearPermissionBlock()
+        openSystemAudioPrivacySettings()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+            self?.startSystemEQMode()
         }
     }
 

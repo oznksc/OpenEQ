@@ -155,6 +155,10 @@ final class SystemAudioManager {
         mode = .systemEQ
         lastSystemEQPreset = preset
         prefersSystemEQRunning = true
+        // Clear sticky error/permission UI so a retry can show the real new outcome.
+        status = .ready
+        systemEQSetupDetail = nil
+        isReceivingTapAudio = false
         guard #available(macOS 14.2, *) else {
             status = .failed("System-wide EQ requires macOS 14.2 or later.")
             prefersSystemEQRunning = false
@@ -279,9 +283,12 @@ final class SystemAudioManager {
     }
 
     func openSystemAudioPrivacySettings() {
+        // Prefer the modern Settings deep links used on Sonoma/Sequoia+.
         let candidates = [
-            "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent",
             "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_ScreenCapture",
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
+            "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension",
             "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone"
         ]
 
@@ -294,6 +301,14 @@ final class SystemAudioManager {
         if let fallback = URL(string: "x-apple.systempreferences:com.apple.preference.security") {
             NSWorkspace.shared.open(fallback)
         }
+    }
+
+    /// Clears sticky permission/failed state so Start can be retried cleanly.
+    func clearPermissionBlock() {
+        if status == .permissionRequired || status.isTerminalFailure {
+            status = mode == .disabled ? .stopped : .ready
+        }
+        systemEQSetupDetail = nil
     }
 
     func getInputDevices() -> [AudioDevice] { deviceManager.getInputDevices() }
@@ -436,9 +451,9 @@ final class SystemAudioManager {
     }
 
     private func updateStatusForCurrentMode() {
-        if status == .running, deviceManager.lastError == nil { return }
-        if status == .permissionRequired { return }
-        if case .failed = status, mode == .systemEQ, systemAudioEQEngine.status == status {
+        // Never sticky-lock permission/failed forever — device refresh used to freeze the UI
+        // on "Permission Required" even after TCC was granted.
+        if status == .running, systemAudioEQEngine.status == .running, deviceManager.lastError == nil {
             return
         }
         if let err = deviceManager.lastError {
@@ -454,13 +469,15 @@ final class SystemAudioManager {
                 status = .failed("Requires macOS 14.2+")
                 return
             }
-            if systemAudioEQEngine.status == .running {
+            // Prefer live engine status so retries surface the real error.
+            switch systemAudioEQEngine.status {
+            case .running:
                 status = .running
-            } else if case .failed = systemAudioEQEngine.status {
-                status = systemAudioEQEngine.status
-            } else if systemAudioEQEngine.status == .permissionRequired {
+            case .failed(let message):
+                status = .failed(message)
+            case .permissionRequired:
                 status = .permissionRequired
-            } else {
+            case .stopped, .ready, .unavailable:
                 status = .ready
             }
         case .externalLoopback:

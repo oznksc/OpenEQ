@@ -116,6 +116,10 @@ struct SystemAudioView: View {
                 permissionRecoveryPanel
             }
 
+            if case .failed(let message) = viewModel.systemAudioStatus {
+                failurePanel(message)
+            }
+
             if !viewModel.conflictingHALPlugins.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
                     Label(
@@ -413,25 +417,66 @@ struct SystemAudioView: View {
     private var permissionRecoveryPanel: some View {
         VStack(alignment: .leading, spacing: 8) {
             Label(
-                "Screen & System Audio Recording permission is required.",
+                "Screen & System Audio Recording may be off for this OpenEQ build.",
                 systemImage: "lock.shield"
             )
             .font(.caption)
             .foregroundStyle(.orange)
             .fixedSize(horizontal: false, vertical: true)
 
-            Button {
-                viewModel.openSystemAudioPrivacySettings()
-            } label: {
-                Label("Open Privacy Settings", systemImage: "gear")
-                    .font(.caption)
-                    .frame(maxWidth: .infinity)
+            Text("Xcode builds can appear as a separate entry. In System Settings → Privacy & Security → Screen & System Audio Recording, enable every OpenEQ checkbox, then Start again.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 8) {
+                Button {
+                    viewModel.openSystemAudioPrivacySettings()
+                } label: {
+                    Label("Open Settings", systemImage: "gear")
+                        .font(.caption)
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+
+                Button {
+                    viewModel.retrySystemEQAfterPermission()
+                } label: {
+                    Label("Retry Start", systemImage: "arrow.clockwise")
+                        .font(.caption)
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
             }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
         }
         .padding(10)
         .background(Color.orange.opacity(0.08))
+        .cornerRadius(6)
+    }
+
+    private func failurePanel(_ message: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("System EQ failed", systemImage: "xmark.octagon.fill")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.red)
+            Text(message)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Button {
+                viewModel.startSystemEQMode()
+            } label: {
+                Label("Retry Start", systemImage: "arrow.clockwise")
+                    .font(.caption)
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+        }
+        .padding(10)
+        .background(Color.red.opacity(0.08))
         .cornerRadius(6)
     }
 

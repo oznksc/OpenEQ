@@ -387,6 +387,12 @@ final class OpenEQTests: XCTestCase {
         XCTAssertTrue(SystemAudioStatus.permissionRequired.isTerminalFailure)
         XCTAssertTrue(SystemAudioStatus.failed("x").isTerminalFailure)
         XCTAssertFalse(SystemAudioStatus.running.isTerminalFailure)
+        // Failed setup messages must remain readable (not collapsed into permission only).
+        if case .failed(let message) = SystemAudioStatus.failed("Create aggregate failed") {
+            XCTAssertTrue(message.contains("aggregate"))
+        } else {
+            XCTFail("Expected failed status")
+        }
     }
 
     func testSystemAudioModesCoverProductPaths() {
