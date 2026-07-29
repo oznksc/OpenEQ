@@ -1,10 +1,9 @@
 import SwiftUI
-import UniformTypeIdentifiers
 import AppKit
 
 struct HeadphoneLibraryView: View {
     @Bindable var viewModel: OpenEQViewModel
-    @State private var searchText = ""
+    @Binding var searchText: String
 
     private var filtered: [HeadphoneProfile] {
         viewModel.filteredHeadphoneProfiles(query: searchText)
@@ -12,70 +11,46 @@ struct HeadphoneLibraryView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Label("Headphone EQ", systemImage: "headphones")
-                    .font(.caption.weight(.semibold))
-                Spacer()
-                Text("\(filtered.count)")
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.secondary)
-            }
-
-            TextField("Search headphones…", text: $searchText)
-                .textFieldStyle(.roundedBorder)
-                .controlSize(.small)
-
-            Text("Curated AutoEQ-style starters. Import measurement-accurate files from AutoEQ or REW for best results.")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-                .fixedSize(horizontal: false, vertical: true)
-
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 4) {
-                    ForEach(filtered.prefix(40)) { profile in
-                        Button {
-                            viewModel.applyHeadphoneProfile(profile)
-                        } label: {
-                            HStack {
-                                VStack(alignment: .leading, spacing: 1) {
-                                    Text(profile.displayName)
-                                        .font(.caption)
-                                        .foregroundStyle(.primary)
-                                        .lineLimit(1)
-                                    Text("\(profile.target) · \(profile.source)")
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(1)
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    if filtered.isEmpty {
+                        Text(searchText.isEmpty ? "No profiles" : "No matches")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                            .padding(.vertical, 8)
+                    } else {
+                        ForEach(filtered.prefix(30)) { profile in
+                            Button {
+                                viewModel.applyHeadphoneProfile(profile)
+                            } label: {
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 1) {
+                                        Text(profile.displayName)
+                                            .font(.caption)
+                                            .foregroundStyle(.primary)
+                                            .lineLimit(1)
+                                        Text(profile.target)
+                                            .font(.caption2)
+                                            .foregroundStyle(.tertiary)
+                                            .lineLimit(1)
+                                    }
+                                    Spacer(minLength: 0)
                                 }
-                                Spacer()
-                                Image(systemName: "plus.circle")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+                                .padding(.vertical, 6)
+                                .contentShape(Rectangle())
                             }
-                            .padding(.vertical, 4)
-                            .padding(.horizontal, 6)
-                            .contentShape(Rectangle())
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
-                        .background(
-                            RoundedRectangle(cornerRadius: 6)
-                                .fill(Color.primary.opacity(0.03))
-                        )
                     }
                 }
             }
-            .frame(maxHeight: 160)
+            .frame(maxHeight: 140)
 
-            HStack(spacing: 8) {
-                Button {
+            HStack(spacing: 16) {
+                Button("Import AutoEQ / REW") {
                     viewModel.importCalibrationFile()
-                } label: {
-                    Label("Import AutoEQ / REW", systemImage: "square.and.arrow.down")
-                        .font(.caption)
-                        .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
+                .buttonStyle(.borderless)
 
                 Button {
                     if let url = URL(string: "https://autoeq.app") {
@@ -84,23 +59,19 @@ struct HeadphoneLibraryView: View {
                 } label: {
                     Image(systemName: "safari")
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .help("Open autoeq.app for full database")
+                .buttonStyle(.borderless)
+                .help("autoeq.app")
             }
+            .font(.caption)
+            .foregroundStyle(.secondary)
 
             if let message = viewModel.calibrationImportMessage {
                 Text(message)
                     .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .padding(12)
-        .background(Color(nsColor: .controlBackgroundColor).opacity(0.35))
-        .cornerRadius(10)
-        .onAppear {
-            viewModel.loadHeadphoneCatalogIfNeeded()
-        }
+        .onAppear { viewModel.loadHeadphoneCatalogIfNeeded() }
     }
 }

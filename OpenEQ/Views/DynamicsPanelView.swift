@@ -4,95 +4,69 @@ struct DynamicsPanelView: View {
     @Bindable var viewModel: OpenEQViewModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Label("Dynamics", systemImage: "waveform.path.ecg")
-                    .font(.caption.weight(.semibold))
+                Text("Compressor")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
                 Spacer()
-                Toggle("Comp", isOn: Binding(
+                Toggle("Compressor", isOn: Binding(
                     get: { viewModel.dynamics.isCompressorEnabled },
                     set: { viewModel.setCompressorEnabled($0) }
                 ))
-                .toggleStyle(.switch)
-                .controlSize(.mini)
                 .labelsHidden()
-                .help("Enable compressor")
+                .toggleStyle(.switch)
+                .controlSize(.small)
             }
 
-            parameterRow(
-                title: "Thresh",
-                valueText: String(format: "%.0f dB", viewModel.dynamics.threshold),
-                value: Binding(
-                    get: { Double(viewModel.dynamics.threshold) },
-                    set: { viewModel.setCompressorThreshold(Float($0)) }
-                ),
-                range: Double(DynamicsSettings.thresholdRange.lowerBound)...Double(DynamicsSettings.thresholdRange.upperBound)
-            )
+            Group {
+                row("Thresh", String(format: "%.0f dB", viewModel.dynamics.threshold),
+                    Binding(
+                        get: { Double(viewModel.dynamics.threshold) },
+                        set: { viewModel.setCompressorThreshold(Float($0)) }
+                    ),
+                    Double(DynamicsSettings.thresholdRange.lowerBound)...Double(DynamicsSettings.thresholdRange.upperBound)
+                )
+                row("Ratio", String(format: "%.1f:1", viewModel.dynamics.ratio),
+                    Binding(
+                        get: { Double(viewModel.dynamics.ratio) },
+                        set: { viewModel.setCompressorRatio(Float($0)) }
+                    ),
+                    Double(DynamicsSettings.ratioRange.lowerBound)...Double(DynamicsSettings.ratioRange.upperBound)
+                )
+                row("Attack", String(format: "%.0f ms", viewModel.dynamics.attack * 1000),
+                    Binding(
+                        get: { Double(viewModel.dynamics.attack) },
+                        set: { viewModel.setCompressorAttack(Float($0)) }
+                    ),
+                    Double(DynamicsSettings.attackRange.lowerBound)...Double(DynamicsSettings.attackRange.upperBound)
+                )
+                row("Release", String(format: "%.0f ms", viewModel.dynamics.release * 1000),
+                    Binding(
+                        get: { Double(viewModel.dynamics.release) },
+                        set: { viewModel.setCompressorRelease(Float($0)) }
+                    ),
+                    Double(DynamicsSettings.releaseRange.lowerBound)...Double(DynamicsSettings.releaseRange.upperBound)
+                )
+                row("Makeup", String(format: "%+.1f dB", viewModel.dynamics.makeupGain),
+                    Binding(
+                        get: { Double(viewModel.dynamics.makeupGain) },
+                        set: { viewModel.setCompressorMakeup(Float($0)) }
+                    ),
+                    Double(DynamicsSettings.makeupRange.lowerBound)...Double(DynamicsSettings.makeupRange.upperBound)
+                )
+            }
             .disabled(!viewModel.dynamics.isCompressorEnabled)
+            .opacity(viewModel.dynamics.isCompressorEnabled ? 1 : 0.4)
 
-            parameterRow(
-                title: "Ratio",
-                valueText: String(format: "%.1f:1", viewModel.dynamics.ratio),
-                value: Binding(
-                    get: { Double(viewModel.dynamics.ratio) },
-                    set: { viewModel.setCompressorRatio(Float($0)) }
-                ),
-                range: Double(DynamicsSettings.ratioRange.lowerBound)...Double(DynamicsSettings.ratioRange.upperBound)
-            )
-            .disabled(!viewModel.dynamics.isCompressorEnabled)
-
-            parameterRow(
-                title: "Attack",
-                valueText: String(format: "%.0f ms", viewModel.dynamics.attack * 1000),
-                value: Binding(
-                    get: { Double(viewModel.dynamics.attack) },
-                    set: { viewModel.setCompressorAttack(Float($0)) }
-                ),
-                range: Double(DynamicsSettings.attackRange.lowerBound)...Double(DynamicsSettings.attackRange.upperBound)
-            )
-            .disabled(!viewModel.dynamics.isCompressorEnabled)
-
-            parameterRow(
-                title: "Release",
-                valueText: String(format: "%.0f ms", viewModel.dynamics.release * 1000),
-                value: Binding(
-                    get: { Double(viewModel.dynamics.release) },
-                    set: { viewModel.setCompressorRelease(Float($0)) }
-                ),
-                range: Double(DynamicsSettings.releaseRange.lowerBound)...Double(DynamicsSettings.releaseRange.upperBound)
-            )
-            .disabled(!viewModel.dynamics.isCompressorEnabled)
-
-            parameterRow(
-                title: "Makeup",
-                valueText: String(format: "%+.1f dB", viewModel.dynamics.makeupGain),
-                value: Binding(
-                    get: { Double(viewModel.dynamics.makeupGain) },
-                    set: { viewModel.setCompressorMakeup(Float($0)) }
-                ),
-                range: Double(DynamicsSettings.makeupRange.lowerBound)...Double(DynamicsSettings.makeupRange.upperBound)
-            )
-            .disabled(!viewModel.dynamics.isCompressorEnabled)
-
-            Divider().opacity(0.4)
-
-            parameterRow(
-                title: "Balance",
-                valueText: balanceLabel,
-                value: Binding(
+            row("Balance", balanceLabel,
+                Binding(
                     get: { Double(viewModel.dynamics.balance) },
                     set: { viewModel.setStereoBalance(Float($0)) }
                 ),
-                range: Double(DynamicsSettings.balanceRange.lowerBound)...Double(DynamicsSettings.balanceRange.upperBound)
+                Double(DynamicsSettings.balanceRange.lowerBound)...Double(DynamicsSettings.balanceRange.upperBound)
             )
-
-            Text("Peak limiter remains always-on after the compressor.")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
         }
-        .padding(12)
-        .background(Color(nsColor: .controlBackgroundColor).opacity(0.35))
-        .cornerRadius(10)
     }
 
     private var balanceLabel: String {
@@ -101,25 +75,24 @@ struct DynamicsPanelView: View {
         return b < 0 ? String(format: "L %.0f%%", abs(b) * 100) : String(format: "R %.0f%%", b * 100)
     }
 
-    private func parameterRow(
-        title: String,
-        valueText: String,
-        value: Binding<Double>,
-        range: ClosedRange<Double>
+    private func row(
+        _ title: String,
+        _ value: String,
+        _ binding: Binding<Double>,
+        _ range: ClosedRange<Double>
     ) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Text(title)
-                    .font(.caption2.weight(.semibold))
+                    .font(.caption)
                     .foregroundStyle(.secondary)
-                    .frame(width: 52, alignment: .leading)
                 Spacer()
-                Text(valueText)
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.secondary)
+                Text(value)
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.tertiary)
             }
-            Slider(value: value, in: range)
-                .controlSize(.mini)
+            Slider(value: binding, in: range)
+                .controlSize(.small)
         }
     }
 }

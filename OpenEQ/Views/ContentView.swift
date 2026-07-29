@@ -11,7 +11,7 @@ struct ContentView: View {
             .onReceive(NotificationCenter.default.publisher(for: .resetEQ)) { _ in
                 viewModel.resetEQ()
             }
-            .frame(minWidth: 800, minHeight: 520)
+            .frame(minWidth: OpenEQTheme.minWindowWidth, minHeight: OpenEQTheme.minWindowHeight)
     }
 }
 

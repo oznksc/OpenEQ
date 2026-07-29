@@ -26,8 +26,8 @@ struct OpenEQApp: App {
                 }
         }
         .windowResizability(.contentMinSize)
-        .defaultSize(width: 1100, height: 700)
-        .windowStyle(.titleBar)
+        .defaultSize(width: 1180, height: 760)
+        .windowToolbarStyle(.unified)
         .commands {
             CommandGroup(replacing: .newItem) {
                 Button("Open Audio...") {
@@ -61,6 +61,18 @@ struct OpenEQApp: App {
                         viewModel.applyPreset(preset)
                     }
                 }
+            }
+
+            CommandMenu("System Audio") {
+                Button(viewModel.isSystemEQActive ? "Stop System EQ" : "Start System EQ") {
+                    viewModel.toggleSystemEQOneClick()
+                }
+                .keyboardShortcut("s", modifiers: [.command, .shift])
+
+                Button("System Audio Settings…") {
+                    viewModel.isShowingSystemAudio = true
+                }
+                .keyboardShortcut(",", modifiers: [.command, .shift])
             }
         }
 

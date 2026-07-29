@@ -1,10 +1,3 @@
-//
-//  LevelMeterView.swift
-//  OpenEQ
-//
-//  Created by Ozan
-//
-
 import Foundation
 import SwiftUI
 
@@ -13,92 +6,53 @@ struct LevelMeterView: View {
     let rightLevel: Float
     let peakLevel: Float
 
-    @State private var displayedLeftLevel: Float = 0.0
-    @State private var displayedRightLevel: Float = 0.0
+    @State private var displayedLeft: Float = 0
+    @State private var displayedRight: Float = 0
 
     var body: some View {
-        HStack(spacing: 8) {
-            VStack(alignment: .leading, spacing: 4) {
-                meterRow(label: "L", level: displayedLeftLevel)
-                meterRow(label: "R", level: displayedRightLevel)
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 3) {
+                meter("L", displayedLeft)
+                meter("R", displayedRight)
             }
 
             Text(peakText)
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.secondary)
-                .frame(width: 58, alignment: .trailing)
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(.tertiary)
+                .frame(width: 52, alignment: .trailing)
         }
-        .padding(.horizontal, 9)
-        .padding(.vertical, 6)
-        .background(Color.white.opacity(0.045))
-        .clipShape(RoundedRectangle(cornerRadius: 6))
         .onAppear {
-            displayedLeftLevel = leftLevel
-            displayedRightLevel = rightLevel
+            displayedLeft = leftLevel
+            displayedRight = rightLevel
         }
-        .onChange(of: leftLevel) { _, newValue in
-            updateDisplayedLevels(left: newValue, right: rightLevel)
-        }
-        .onChange(of: rightLevel) { _, newValue in
-            updateDisplayedLevels(left: leftLevel, right: newValue)
-        }
-        .accessibilityLabel("Peak level meter. Current peak is \(peakText).")
+        .onChange(of: leftLevel) { _, v in displayedLeft = v }
+        .onChange(of: rightLevel) { _, v in displayedRight = v }
+        .accessibilityLabel("Peak \(peakText)")
     }
 
-    private func meterRow(label: String, level: Float) -> some View {
-        HStack(spacing: 5) {
+    private func meter(_ label: String, _ level: Float) -> some View {
+        HStack(spacing: 4) {
             Text(label)
                 .font(.caption2.monospaced())
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.tertiary)
                 .frame(width: 8, alignment: .leading)
 
             GeometryReader { proxy in
                 ZStack(alignment: .leading) {
                     Capsule()
-                        .fill(Color.white.opacity(0.10))
-
+                        .fill(Color.primary.opacity(0.06))
                     Capsule()
-                        .fill(meterColor(for: level))
-                        .frame(width: proxy.size.width * CGFloat(max(0.0, min(1.0, level))))
+                        .fill(level > 0.9 ? Color.orange : Color.accentColor.opacity(0.85))
+                        .frame(width: max(2, proxy.size.width * CGFloat(min(max(level, 0), 1))))
                 }
             }
-            .frame(width: 82, height: 5)
+            .frame(width: 64, height: 4)
         }
-    }
-
-    private func updateDisplayedLevels(left: Float, right: Float) {
-        let duration = max(left, right) >= max(displayedLeftLevel, displayedRightLevel) ? 0.08 : 0.35
-
-        withAnimation(.easeOut(duration: duration)) {
-            displayedLeftLevel = left
-            displayedRightLevel = right
-        }
-    }
-
-    private func meterColor(for level: Float) -> Color {
-        if level >= 0.96 {
-            return .red.opacity(0.85)
-        }
-
-        if level >= 0.82 {
-            return .yellow.opacity(0.85)
-        }
-
-        return .green.opacity(0.78)
     }
 
     private var peakText: String {
-        guard peakLevel > 0.000_1 else {
-            return "-inf dB"
-        }
-
-        let db = 20 * log10(max(peakLevel, 0.000_1))
+        if peakLevel <= 0.0001 { return "−∞ dB" }
+        let db = 20.0 * log10(max(Double(peakLevel), 1e-6))
         return String(format: "%+.1f dB", db)
     }
-}
-
-#Preview {
-    LevelMeterView(leftLevel: 0.62, rightLevel: 0.74, peakLevel: 0.74)
-        .padding()
-        .frame(width: 240)
 }

@@ -2,114 +2,91 @@ import SwiftUI
 
 struct PresetPanelView: View {
     let viewModel: OpenEQViewModel
-
     @State private var newPresetName = ""
-    @State private var hoveredPresetId: UUID? = nil
+
+    private var builtIn: [EQPreset] {
+        viewModel.presets.filter { p in
+            EQPreset.defaultPresets().contains { $0.id == p.id }
+        }
+    }
+
+    private var custom: [EQPreset] {
+        viewModel.presets.filter { p in
+            !EQPreset.defaultPresets().contains { $0.id == p.id }
+        }
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Label("Presets", systemImage: "slider.horizontal.below.rectangle")
-                .font(.subheadline.weight(.semibold))
-
-            HStack(spacing: 6) {
-                TextField("New preset...", text: $newPresetName)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.caption)
-
-                Button(action: savePreset) {
-                    Image(systemName: "plus")
-                        .font(.caption)
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-                .disabled(newPresetName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            }
-
-            ScrollView(.vertical, showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 8) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("BUILT-IN")
-                            .font(.system(size: 9, weight: .bold))
-                            .foregroundStyle(.secondary)
-                            .padding(.leading, 4)
-
-                        ForEach(viewModel.presets.filter { preset in
-                            EQPreset.defaultPresets().contains(where: { $0.id == preset.id })
-                        }) { preset in
-                            presetRow(preset: preset, isCustom: false)
-                        }
-                    }
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("USER")
-                            .font(.system(size: 9, weight: .bold))
-                            .foregroundStyle(.secondary)
-                            .padding(.leading, 4)
-
-                        let customPresets = viewModel.presets.filter { preset in
-                            !EQPreset.defaultPresets().contains(where: { $0.id == preset.id })
-                        }
-
-                        if customPresets.isEmpty {
-                            Text("No custom presets")
-                                .font(.caption)
-                                .foregroundStyle(.secondary.opacity(0.7))
-                                .padding(.leading, 8)
-                                .padding(.vertical, 4)
-                        } else {
-                            ForEach(customPresets) { preset in
-                                presetRow(preset: preset, isCustom: true)
-                            }
-                        }
-                    }
-                }
-            }
-
+        VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
-                Button(action: { viewModel.importPreset() }) {
-                    Label("Import", systemImage: "square.and.arrow.down")
-                        .font(.caption)
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
+                TextField("Save as…", text: $newPresetName)
+                    .textFieldStyle(.plain)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
 
-                Button(action: { viewModel.exportPreset(viewModel.selectedPreset) }) {
-                    Label("Export", systemImage: "square.and.arrow.up")
-                        .font(.caption)
-                        .frame(maxWidth: .infinity)
+                Button {
+                    save()
+                } label: {
+                    Image(systemName: "plus")
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
+                .buttonStyle(.borderless)
+                .disabled(newPresetName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .help("Save preset")
             }
+
+            presetGroup("Built-in", presets: builtIn, custom: false)
+
+            presetGroup("Yours", presets: custom, custom: true)
+
+            HStack(spacing: 16) {
+                Button("Import") { viewModel.importPreset() }
+                    .buttonStyle(.borderless)
+                Button("Export") { viewModel.exportPreset(viewModel.selectedPreset) }
+                    .buttonStyle(.borderless)
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 16)
-        .padding(.bottom, 8)
-        .background(Color.clear)
     }
 
     @ViewBuilder
-    private func presetRow(preset: EQPreset, isCustom: Bool) -> some View {
-        let isSelected = preset.id == viewModel.selectedPreset.id
+    private func presetGroup(_ title: String, presets: [EQPreset], custom: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.tertiary)
+                .padding(.top, 4)
 
-        HStack {
-            Button(action: { viewModel.applyPreset(preset) }) {
-                HStack(spacing: 8) {
-                    Image(systemName: isCustom ? "person.fill" : "slider.horizontal.3")
-                        .foregroundStyle(isSelected ? Color.accentColor : Color.secondary.opacity(0.8))
-                        .font(.system(size: 10))
+            if presets.isEmpty {
+                Text("None yet")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .padding(.vertical, 4)
+            } else {
+                ForEach(presets) { preset in
+                    presetRow(preset, isCustom: custom)
+                }
+            }
+        }
+    }
 
+    private func presetRow(_ preset: EQPreset, isCustom: Bool) -> some View {
+        let selected = preset.id == viewModel.selectedPreset.id
+
+        return HStack(spacing: 8) {
+            Button {
+                viewModel.applyPreset(preset)
+            } label: {
+                HStack {
                     Text(preset.name)
-                        .font(.system(size: 12, weight: isSelected ? .medium : .regular))
-                        .foregroundStyle(isSelected ? .primary : .secondary)
+                        .font(.subheadline.weight(selected ? .semibold : .regular))
+                        .foregroundStyle(selected ? .primary : .secondary)
                         .lineLimit(1)
-
-                    Spacer()
-
-                    if isSelected {
+                    Spacer(minLength: 0)
+                    if selected {
                         Image(systemName: "checkmark")
-                            .font(.system(size: 9, weight: .bold))
+                            .font(.caption2.weight(.bold))
                             .foregroundStyle(.tint)
                     }
                 }
@@ -118,46 +95,23 @@ struct PresetPanelView: View {
             .buttonStyle(.plain)
 
             if isCustom {
-                HStack(spacing: 6) {
-                    Button(action: { viewModel.exportPreset(preset) }) {
-                        Image(systemName: "square.and.arrow.up")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.secondary)
-                    }
-                    .buttonStyle(.plain)
-
-                    Button(action: { viewModel.deletePreset(id: preset.id) }) {
-                        Image(systemName: "trash")
-                            .font(.system(size: 10))
-                            .foregroundStyle(hoveredPresetId == preset.id ? Color.red : Color.secondary.opacity(0.6))
-                    }
-                    .buttonStyle(.plain)
+                Button {
+                    viewModel.deletePreset(id: preset.id)
+                } label: {
+                    Image(systemName: "trash")
+                        .font(.caption2)
                 }
+                .buttonStyle(.borderless)
+                .foregroundStyle(.tertiary)
             }
         }
-        .padding(.horizontal, 8)
         .padding(.vertical, 5)
-        .background(
-            RoundedRectangle(cornerRadius: 6)
-                .fill(isSelected ? Color.accentColor.opacity(0.08) : (hoveredPresetId == preset.id ? Color.primary.opacity(0.03) : Color.clear))
-        )
-        .onHover { hovering in
-            hoveredPresetId = hovering ? preset.id : (hoveredPresetId == preset.id ? nil : hoveredPresetId)
-        }
     }
 
-    private func savePreset() {
+    private func save() {
         let name = newPresetName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { return }
         viewModel.saveCurrentPreset(name: name, bands: viewModel.bands, preamp: viewModel.preamp)
         newPresetName = ""
     }
-}
-
-#Preview {
-    PresetPanelView(
-        viewModel: OpenEQViewModel(audioEngineController: AudioEngineController())
-    )
-    .frame(width: 280, height: 500)
-    .background(Color(nsColor: .windowBackgroundColor))
 }

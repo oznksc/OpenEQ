@@ -4,9 +4,12 @@ struct ParametricEQView: View {
     let viewModel: OpenEQViewModel
 
     var body: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: 0) {
             ForEach(Array(viewModel.bands.enumerated()), id: \.element.id) { index, band in
-                ParametricBandCard(
+                if index > 0 {
+                    Divider().opacity(0.25)
+                }
+                ParametricBandRow(
                     index: index,
                     band: band,
                     onFrequencyChanged: { viewModel.updateBandFrequency(index: index, frequency: $0) },
@@ -20,7 +23,7 @@ struct ParametricEQView: View {
     }
 }
 
-private struct ParametricBandCard: View {
+private struct ParametricBandRow: View {
     let index: Int
     let band: EQBand
     let onFrequencyChanged: (Float) -> Void
@@ -33,13 +36,13 @@ private struct ParametricBandCard: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 12) {
                 Text("B\(index + 1)")
-                    .font(.system(size: 11, weight: .bold, design: .rounded))
-                    .foregroundStyle(band.isEnabled ? Color.accentColor : Color.secondary)
-                    .frame(width: 20, alignment: .leading)
+                    .font(.caption.weight(.bold).monospaced())
+                    .foregroundStyle(band.isEnabled ? Color.accentColor : .secondary)
+                    .frame(width: 22, alignment: .leading)
 
                 Toggle("", isOn: enabledBinding)
                     .toggleStyle(.switch)
-                    .controlSize(.small)
+                    .controlSize(.mini)
                     .labelsHidden()
 
                 Picker("", selection: filterTypeBinding) {
@@ -49,73 +52,52 @@ private struct ParametricBandCard: View {
                 }
                 .labelsHidden()
                 .controlSize(.small)
-                .frame(width: 105)
+                .frame(width: 100)
 
-                Spacer()
+                Spacer(minLength: 8)
 
-                HStack(spacing: 4) {
-                    TextField("", value: frequencyBinding, format: .number.precision(.fractionLength(0)))
-                        .textFieldStyle(.plain)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 3)
-                        .background(Color.primary.opacity(0.04))
-                        .cornerRadius(4)
-                        .frame(width: 50)
-                        .font(.system(size: 11, design: .monospaced))
-                    Text("Hz")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(.tertiary)
-                }
+                TextField("", value: frequencyBinding, format: .number.precision(.fractionLength(0)))
+                    .textFieldStyle(.plain)
+                    .font(.caption.monospaced())
+                    .frame(width: 48)
+                    .multilineTextAlignment(.trailing)
+                Text("Hz")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
             }
 
-            HStack(spacing: 12) {
-                HStack(spacing: 6) {
-                    Text("GAIN")
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(.tertiary)
-                        .frame(width: 30, alignment: .leading)
-
-                    Slider(value: gainBinding, in: Double(EQBand.gainRange.lowerBound)...Double(EQBand.gainRange.upperBound), step: 0.5)
-                        .controlSize(.small)
-
-                    Text(String(format: "%+.1f dB", band.gain))
-                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(gainColor)
-                        .frame(width: 54, alignment: .trailing)
-                }
-
-                Divider()
-                    .frame(height: 12)
-                    .opacity(0.5)
-
-                HStack(spacing: 6) {
-                    Text("Q")
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(.tertiary)
-                        .frame(width: 12, alignment: .leading)
-
-                    Slider(value: qBinding, in: Double(EQBand.qRange.lowerBound)...Double(EQBand.qRange.upperBound), step: 0.1)
-                        .controlSize(.small)
-                        .frame(width: 80)
-
-                    Text(String(format: "%.1f", band.q))
-                        .font(.system(size: 10, weight: .medium, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 28, alignment: .trailing)
-                }
+            HStack(spacing: 16) {
+                labeledSlider("Gain", gainBinding,
+                              Double(EQBand.gainRange.lowerBound)...Double(EQBand.gainRange.upperBound),
+                              String(format: "%+.1f dB", band.gain))
+                labeledSlider("Q", qBinding,
+                              Double(EQBand.qRange.lowerBound)...Double(EQBand.qRange.upperBound),
+                              String(format: "%.1f", band.q))
+                .frame(maxWidth: 200)
             }
         }
-        .padding(.horizontal, 12)
         .padding(.vertical, 10)
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(Color(nsColor: .controlBackgroundColor).opacity(band.isEnabled ? 0.4 : 0.2))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(band.isEnabled ? Color.accentColor.opacity(0.15) : Color.primary.opacity(0.04), lineWidth: 1)
-        )
-        .opacity(band.isEnabled ? 1.0 : 0.65)
+        .opacity(band.isEnabled ? 1 : 0.5)
+    }
+
+    private func labeledSlider(
+        _ title: String,
+        _ value: Binding<Double>,
+        _ range: ClosedRange<Double>,
+        _ label: String
+    ) -> some View {
+        HStack(spacing: 8) {
+            Text(title)
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .frame(width: 32, alignment: .leading)
+            Slider(value: value, in: range)
+                .controlSize(.small)
+            Text(label)
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .frame(width: 52, alignment: .trailing)
+        }
     }
 
     private var enabledBinding: Binding<Bool> {
@@ -133,14 +115,11 @@ private struct ParametricBandCard: View {
     private var qBinding: Binding<Double> {
         Binding(get: { Double(band.q) }, set: { onQChanged(Float($0)) })
     }
-    private var gainColor: Color {
-        band.gain == 0 ? .secondary : (band.gain > 0 ? .green : .red)
-    }
 }
 
 #Preview {
     ParametricEQView(
         viewModel: OpenEQViewModel(audioEngineController: AudioEngineController())
     )
-    .frame(width: 984, height: 340)
+    .padding(24)
 }

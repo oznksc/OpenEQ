@@ -5,29 +5,10 @@ struct AUv3PanelView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Label("AUv3 Insert", systemImage: "puzzlepiece.extension")
-                    .font(.caption.weight(.semibold))
-                Spacer()
-                Button {
-                    viewModel.refreshAUPlugins()
-                } label: {
-                    Image(systemName: "arrow.clockwise")
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.mini)
-                .help("Rescan installed Audio Units")
-            }
-
-            Text("Local playback chain only. System-wide AU hosting is not available yet.")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-                .fixedSize(horizontal: false, vertical: true)
-
             if viewModel.availableAUPlugins.isEmpty {
-                Text("No effect Audio Units found. Click refresh after installing plugins.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                Text("No effect units found")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
             } else {
                 Picker("Plugin", selection: Binding(
                     get: { viewModel.selectedAUPluginID },
@@ -39,32 +20,27 @@ struct AUv3PanelView: View {
                     }
                 }
                 .labelsHidden()
-                .controlSize(.small)
             }
 
-            HStack(spacing: 8) {
-                Button {
-                    viewModel.loadSelectedAUPlugin()
-                } label: {
-                    Label("Load", systemImage: "plus.circle")
-                        .font(.caption)
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-                .disabled(viewModel.selectedAUPluginID == nil || viewModel.isLoadingAUPlugin)
+            HStack(spacing: 16) {
+                Button("Load") { viewModel.loadSelectedAUPlugin() }
+                    .buttonStyle(.borderless)
+                    .disabled(viewModel.selectedAUPluginID == nil || viewModel.isLoadingAUPlugin)
+
+                Button("Unload") { viewModel.unloadAUPlugin() }
+                    .buttonStyle(.borderless)
+                    .disabled(viewModel.loadedAUPluginName == nil)
 
                 Button {
-                    viewModel.unloadAUPlugin()
+                    viewModel.refreshAUPlugins()
                 } label: {
-                    Label("Unload", systemImage: "minus.circle")
-                        .font(.caption)
-                        .frame(maxWidth: .infinity)
+                    Image(systemName: "arrow.clockwise")
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .disabled(viewModel.loadedAUPluginName == nil)
+                .buttonStyle(.borderless)
+                .help("Rescan")
             }
+            .font(.caption)
+            .foregroundStyle(.secondary)
 
             if viewModel.isLoadingAUPlugin {
                 ProgressView()
@@ -72,8 +48,8 @@ struct AUv3PanelView: View {
             }
 
             if let loaded = viewModel.loadedAUPluginName {
-                Label(loaded, systemImage: "checkmark.circle.fill")
-                    .font(.caption2)
+                Text(loaded)
+                    .font(.caption)
                     .foregroundStyle(.green)
                     .lineLimit(2)
             }
@@ -84,10 +60,11 @@ struct AUv3PanelView: View {
                     .foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)
             }
+
+            Text("Local playback only")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
         }
-        .padding(12)
-        .background(Color(nsColor: .controlBackgroundColor).opacity(0.35))
-        .cornerRadius(10)
         .onAppear {
             if viewModel.availableAUPlugins.isEmpty {
                 viewModel.refreshAUPlugins()

@@ -9,15 +9,15 @@ struct SpectrumView: View {
     let peakLevel: Float
     let isClipping: Bool
 
-    @State private var peakLevels: [Float] = Array(repeating: 0.0, count: SpectrumAnalyzer.barCount)
+    @State private var peakLevels: [Float] = Array(repeating: 0, count: SpectrumAnalyzer.barCount)
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 10) {
-                Label(title, systemImage: "chart.bar.xaxis")
-                    .font(.subheadline.weight(.semibold))
+        VStack(alignment: .leading, spacing: OpenEQTheme.controlSpacing) {
+            HStack(alignment: .center, spacing: 16) {
+                Text(title)
+                    .font(.title3.weight(.semibold))
 
-                Spacer()
+                Spacer(minLength: 12)
 
                 LevelMeterView(
                     leftLevel: leftLevel,
@@ -29,110 +29,97 @@ struct SpectrumView: View {
             }
 
             if let warning {
-                HStack(spacing: 6) {
-                    Image(systemName: "info.circle")
-                        .foregroundStyle(.secondary)
-                    Text(warning)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(Color.primary.opacity(0.04))
-                .clipShape(RoundedRectangle(cornerRadius: 6))
+                Text(warning)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
-            GeometryReader { proxy in
+            GeometryReader { _ in
                 Canvas { context, size in
                     let barCount = levels.count
                     guard barCount > 0 else { return }
 
-                    let spacing: CGFloat = 1.5
-                    let totalSpacing = spacing * CGFloat(barCount - 1)
-                    let barWidth = (size.width - totalSpacing) / CGFloat(barCount)
+                    let gap: CGFloat = 2
+                    let totalGap = gap * CGFloat(barCount - 1)
+                    let barWidth = max(1, (size.width - totalGap) / CGFloat(barCount))
 
                     for i in 1...3 {
                         let y = size.height * CGFloat(i) * 0.25
-                        var path = Path()
-                        path.move(to: CGPoint(x: 0, y: y))
-                        path.addLine(to: CGPoint(x: size.width, y: y))
-                        context.stroke(path, with: .color(Color.white.opacity(0.06)), lineWidth: 1)
+                        var grid = Path()
+                        grid.move(to: CGPoint(x: 0, y: y))
+                        grid.addLine(to: CGPoint(x: size.width, y: y))
+                        context.stroke(grid, with: .color(Color.primary.opacity(0.05)), lineWidth: 1)
                     }
 
                     for index in 0..<barCount {
                         let level = levels[index]
-                        let peakLevel = index < peakLevels.count ? peakLevels[index] : level
-                        let x = CGFloat(index) * (barWidth + spacing)
-                        let barHeight = max(1.0, size.height * CGFloat(level))
-                        let barRect = CGRect(x: x, y: size.height - barHeight, width: barWidth, height: barHeight)
+                        let peak = index < peakLevels.count ? peakLevels[index] : level
+                        let x = CGFloat(index) * (barWidth + gap)
+                        let h = max(1, size.height * CGFloat(level))
+                        let rect = CGRect(x: x, y: size.height - h, width: barWidth, height: h)
 
-                        let gradient = GraphicsContext.Shading.linearGradient(
-                            Gradient(colors: [.cyan.opacity(0.95), .blue.opacity(0.85), .purple.opacity(0.75)]),
-                            startPoint: CGPoint(x: 0, y: size.height),
-                            endPoint: CGPoint(x: 0, y: 0)
+                        context.fill(
+                            Path(roundedRect: rect, cornerRadius: 1.5),
+                            with: .linearGradient(
+                                Gradient(colors: [
+                                    Color.accentColor.opacity(0.9),
+                                    Color.cyan.opacity(0.55)
+                                ]),
+                                startPoint: CGPoint(x: 0, y: size.height),
+                                endPoint: CGPoint(x: 0, y: 0)
+                            )
                         )
 
-                        context.fill(Path(roundedRect: barRect, cornerRadius: 1), with: gradient)
-
-                        let peakY = size.height - max(1.0, size.height * CGFloat(peakLevel))
-                        context.fill(Path(CGRect(x: x, y: peakY - 1, width: barWidth, height: 2)), with: .color(Color.teal.opacity(0.9)))
+                        let peakY = size.height - max(1, size.height * CGFloat(peak))
+                        context.fill(
+                            Path(CGRect(x: x, y: peakY - 1, width: barWidth, height: 1.5)),
+                            with: .color(Color.primary.opacity(0.35))
+                        )
                     }
                 }
-                .background(RoundedRectangle(cornerRadius: 8).fill(Color(red: 0.075, green: 0.082, blue: 0.095)))
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.08), lineWidth: 1))
-                .overlay(
-                    Group {
-                        if !levels.contains(where: { $0 > 0.025 }) {
-                            VStack(spacing: 6) {
-                                Image(systemName: "waveform")
-                                    .font(.system(size: 24))
-                                    .foregroundStyle(.cyan.opacity(0.7))
-                                Text("No Audio Source")
-                                    .font(.subheadline.weight(.semibold))
-                                    .foregroundStyle(.white.opacity(0.85))
-                                Text("Press ⌘O or click 'Open Audio'")
-                                    .font(.caption)
-                                    .foregroundStyle(.white.opacity(0.5))
-                            }
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .background(Color(red: 0.075, green: 0.082, blue: 0.095).opacity(0.96))
-                            .cornerRadius(8)
+                .overlay {
+                    if !levels.contains(where: { $0 > 0.025 }) {
+                        VStack(spacing: 6) {
+                            Image(systemName: "waveform")
+                                .font(.title2)
+                                .foregroundStyle(.tertiary)
+                            Text("No audio")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                            Text("⌘O to open a file")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
                         }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
-                )
+                }
             }
+            .frame(minHeight: 140)
 
             HStack {
-                Text("20 Hz").font(.system(size: 9, weight: .semibold, design: .monospaced)).foregroundStyle(.secondary)
-                Spacer()
-                Text("250 Hz").font(.system(size: 9, weight: .semibold, design: .monospaced)).foregroundStyle(.secondary)
-                Spacer()
-                Text("1 kHz").font(.system(size: 9, weight: .semibold, design: .monospaced)).foregroundStyle(.secondary)
-                Spacer()
-                Text("4 kHz").font(.system(size: 9, weight: .semibold, design: .monospaced)).foregroundStyle(.secondary)
-                Spacer()
-                Text("20 kHz").font(.system(size: 9, weight: .semibold, design: .monospaced)).foregroundStyle(.secondary)
+                ForEach(["20 Hz", "250 Hz", "1 kHz", "4 kHz", "20 kHz"], id: \.self) { label in
+                    Text(label)
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.tertiary)
+                    if label != "20 kHz" { Spacer() }
+                }
             }
-            .padding(.horizontal, 8)
         }
-        .padding(12)
         .onChange(of: levels) { _, newValue in
             updatePeaks(with: newValue)
         }
     }
 
-    private func updatePeaks(with currentLevels: [Float]) {
-        if peakLevels.count != currentLevels.count {
-            peakLevels = currentLevels
+    private func updatePeaks(with current: [Float]) {
+        if peakLevels.count != current.count {
+            peakLevels = current
             return
         }
-        for i in 0..<currentLevels.count {
-            let current = currentLevels[i]
-            let existing = peakLevels[i]
-            if current >= existing {
-                peakLevels[i] = current
+        for i in current.indices {
+            if current[i] >= peakLevels[i] {
+                peakLevels[i] = current[i]
             } else {
-                peakLevels[i] = max(0.0, existing - 0.035)
+                peakLevels[i] = max(0, peakLevels[i] - 0.035)
             }
         }
     }
@@ -140,10 +127,11 @@ struct SpectrumView: View {
 
 #Preview {
     SpectrumView(
-        title: "Real-Time FFT Spectrum",
+        title: "Spectrum",
         warning: nil,
         levels: Array(repeating: 0.35, count: SpectrumAnalyzer.barCount),
-        leftLevel: 0.62, rightLevel: 0.58, peakLevel: 0.62, isClipping: false
+        leftLevel: 0.6, rightLevel: 0.55, peakLevel: 0.6, isClipping: false
     )
-    .frame(height: 260)
+    .padding(24)
+    .frame(height: 280)
 }

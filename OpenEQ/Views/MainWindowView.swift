@@ -2,93 +2,96 @@ import SwiftUI
 
 struct MainWindowView: View {
     @Bindable var viewModel: OpenEQViewModel
+    @State private var columnVisibility: NavigationSplitViewVisibility = .all
 
     var body: some View {
-        GeometryReader { geometry in
-            let sidebarWidth = max(260, min(340, geometry.size.width * 0.28))
-
-            VStack(spacing: 0) {
-                header
-                    .frame(height: 52)
-                    .background(Color(nsColor: .windowBackgroundColor))
-
-                Divider()
-                    .opacity(0.4)
-
-                HStack(spacing: 0) {
-                    ScrollView(.vertical, showsIndicators: false) {
-                        VStack(spacing: 16) {
-                            SpectrumView(
-                                title: viewModel.spectrumTitle,
-                                warning: viewModel.spectrumWarning,
-                                levels: viewModel.spectrumLevels,
-                                leftLevel: viewModel.leftLevel,
-                                rightLevel: viewModel.rightLevel,
-                                peakLevel: viewModel.peakLevel,
-                                isClipping: viewModel.isClipping
-                            )
-                            .frame(minHeight: 180)
-                            .background(Color(nsColor: .windowBackgroundColor))
-                            .cornerRadius(12)
-
-                            EqualizerView(viewModel: viewModel)
-                                .background(Color(nsColor: .windowBackgroundColor))
-                                .cornerRadius(12)
-                        }
-                        .padding(16)
-                    }
-                    .layoutPriority(1)
-
-                    Divider()
-                        .opacity(0.4)
-
-                    ScrollView(.vertical, showsIndicators: false) {
-                        VStack(spacing: 12) {
-                            PresetPanelView(viewModel: viewModel)
-                            HeadphoneLibraryView(viewModel: viewModel)
-                            DynamicsPanelView(viewModel: viewModel)
-                            AUv3PanelView(viewModel: viewModel)
-                        }
-                        .padding(10)
-                    }
-                    .frame(width: sidebarWidth)
-                    .background(Color(nsColor: .controlBackgroundColor).opacity(0.2))
-                }
-
-                Divider()
-                    .opacity(0.4)
-
-                PlayerControlsView(viewModel: viewModel)
-                    .frame(height: 56)
-            }
-            .background(Color(nsColor: .windowBackgroundColor))
+        NavigationSplitView(columnVisibility: $columnVisibility) {
+            SidebarView(viewModel: viewModel)
+                .navigationSplitViewColumnWidth(
+                    min: OpenEQTheme.minSidebarWidth,
+                    ideal: OpenEQTheme.idealSidebarWidth,
+                    max: OpenEQTheme.maxSidebarWidth
+                )
+        } detail: {
+            detailColumn
         }
+        .navigationSplitViewStyle(.balanced)
+        // Keep toolbar chrome in the system safe area so sidebar search / content
+        // sit below traffic lights and window toolbar actions.
+        .toolbarTitleDisplayMode(.inline)
+        .toolbar { toolbarContent }
         .sheet(isPresented: $viewModel.isShowingSystemAudio) {
             SystemAudioView(viewModel: viewModel)
         }
     }
 
-    private var header: some View {
-        HStack(spacing: 12) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(LinearGradient(
-                        colors: [.cyan.opacity(0.9), .blue.opacity(0.9)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ))
-                    .frame(width: 28, height: 28)
+    /// Single flat surface: spectrum → EQ → glass player. No content cards.
+    private var detailColumn: some View {
+        VStack(spacing: 0) {
+            ScrollView(.vertical, showsIndicators: false) {
+                VStack(alignment: .leading, spacing: OpenEQTheme.blockSpacing) {
+                    SpectrumView(
+                        title: viewModel.spectrumTitle,
+                        warning: viewModel.spectrumWarning,
+                        levels: viewModel.spectrumLevels,
+                        leftLevel: viewModel.leftLevel,
+                        rightLevel: viewModel.rightLevel,
+                        peakLevel: viewModel.peakLevel,
+                        isClipping: viewModel.isClipping
+                    )
+                    .frame(minHeight: 180)
 
-                Image(systemName: "slider.vertical.3")
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(.white)
+                    EqualizerView(viewModel: viewModel)
+                }
+                .padding(OpenEQTheme.pagePadding)
+                .padding(.bottom, 8)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
 
-            Text("OpenEQ")
-                .font(.system(.title3, design: .rounded).weight(.semibold))
+            PlayerControlsView(viewModel: viewModel)
+                .padding(.horizontal, OpenEQTheme.pagePadding)
+                .padding(.bottom, OpenEQTheme.pagePadding)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .navigationTitle(detailTitle)
+        .navigationSubtitle(detailSubtitle)
+    }
 
-            Spacer()
+    @ToolbarContentBuilder
+    private var toolbarContent: some ToolbarContent {
+        ToolbarItem(placement: .navigation) {
+            HStack(spacing: 6) {
+                OpenEQStatusDot(kind: statusKind)
+                Text(statusLabel)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .monospaced()
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(statusLabel)
+        }
 
+        ToolbarItemGroup(placement: .primaryAction) {
+            Button {
+                viewModel.setEnabled(!viewModel.isEnabled)
+            } label: {
+                Label(
+                    viewModel.isEnabled ? "EQ On" : "Bypassed",
+                    systemImage: viewModel.isEnabled ? "power.circle.fill" : "power.circle"
+                )
+            }
+            .help(viewModel.isEnabled ? "Bypass EQ (⌘B)" : "Enable EQ (⌘B)")
+            .tint(viewModel.isEnabled ? .green : .orange)
+
+            Button {
+                viewModel.resetEQ()
+            } label: {
+                Label("Reset", systemImage: "arrow.counterclockwise")
+            }
+            .help("Reset EQ (⌘R)")
+        }
+
+        ToolbarItem(placement: .confirmationAction) {
             Button {
                 viewModel.toggleSystemEQOneClick()
             } label: {
@@ -96,71 +99,54 @@ struct MainWindowView: View {
                     viewModel.isSystemEQActive ? "System EQ On" : "System EQ",
                     systemImage: viewModel.isSystemEQActive ? "waveform.circle.fill" : "waveform.circle"
                 )
-                .font(.system(size: 11, weight: .medium))
             }
-            .buttonStyle(.borderedProminent)
-            .tint(viewModel.isSystemEQActive ? .green : .accentColor)
-            .controlSize(.small)
-            .help(viewModel.isSystemEQActive ? "Stop system-wide EQ" : "Start system-wide EQ (one click)")
+            .tint(viewModel.isSystemEQActive ? .green : nil)
+            .help(viewModel.isSystemEQActive ? "Stop system-wide EQ" : "Start system-wide EQ")
+        }
 
+        ToolbarItem(placement: .automatic) {
             Button {
                 viewModel.isShowingSystemAudio = true
             } label: {
-                Image(systemName: "gearshape")
-                    .font(.system(size: 11, weight: .medium))
+                Label("System Audio", systemImage: "gearshape")
             }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
             .help("System audio settings")
-
-            if !viewModel.isEnabled {
-                Text("BYPASSED")
-                    .font(.system(size: 9, weight: .bold, design: .monospaced))
-                    .foregroundStyle(.orange)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Color.orange.opacity(0.12))
-                    .cornerRadius(12)
-            }
-
-            HStack(spacing: 6) {
-                Circle()
-                    .fill(statusColor)
-                    .frame(width: 6, height: 6)
-
-                Text(statusLabel)
-                    .font(.system(size: 9, weight: .bold, design: .monospaced))
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 4)
-            .background(Color.primary.opacity(0.04))
-            .cornerRadius(12)
         }
-        .padding(.horizontal, 16)
+    }
+
+    private var detailTitle: String {
+        if viewModel.isSystemEQActive { return "System EQ" }
+        if viewModel.selectedFileURL != nil { return viewModel.selectedFileName }
+        return "Equalizer"
+    }
+
+    private var detailSubtitle: String {
+        if !viewModel.isEnabled { return "Bypassed" }
+        return "\(viewModel.eqMode.title) · \(viewModel.selectedPreset.name)"
     }
 
     private var statusLabel: String {
+        if viewModel.didTripFeedbackProtection { return "FEEDBACK" }
         if viewModel.isSystemEQActive {
-            return "SYSTEM EQ"
+            return viewModel.isEnabled ? "SYSTEM EQ" : "SYSTEM · BYPASS"
         }
-        if viewModel.isExternalLoopbackActive {
-            return "LOOPBACK"
-        }
+        if viewModel.isExternalLoopbackActive { return "LOOPBACK" }
         return viewModel.playbackState.title.uppercased()
     }
 
-    private var statusColor: Color {
-        if viewModel.isSystemEQActive || viewModel.isExternalLoopbackActive {
-            return viewModel.isEnabled ? .green : .orange
+    private var statusKind: OpenEQStatusDot.Kind {
+        if viewModel.didTripFeedbackProtection { return .warning }
+        if !viewModel.isEnabled && (viewModel.isSystemEQActive || viewModel.isExternalLoopbackActive) {
+            return .bypassed
         }
-
+        if viewModel.isSystemEQActive || viewModel.isExternalLoopbackActive { return .active }
+        if case .failed = viewModel.systemAudioStatus { return .error }
+        if viewModel.systemAudioStatus == .permissionRequired { return .warning }
         switch viewModel.playbackState {
-        case .playing: return .green
-        case .paused: return .orange
-        case .stopped, .idle: return .gray
-        case .preparing, .ready: return .blue
-        case .failed: return .red
+        case .playing: return .active
+        case .paused, .preparing, .ready: return .ready
+        case .failed: return .error
+        case .stopped, .idle: return .idle
         }
     }
 }
