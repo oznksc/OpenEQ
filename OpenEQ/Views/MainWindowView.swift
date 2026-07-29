@@ -45,7 +45,10 @@ struct MainWindowView: View {
                     ScrollView(.vertical, showsIndicators: false) {
                         VStack(spacing: 12) {
                             PresetPanelView(viewModel: viewModel)
+                            DynamicsPanelView(viewModel: viewModel)
+                            AUv3PanelView(viewModel: viewModel)
                         }
+                        .padding(10)
                     }
                     .frame(width: sidebarWidth)
                     .background(Color(nsColor: .controlBackgroundColor).opacity(0.2))

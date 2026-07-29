@@ -21,6 +21,8 @@ MVVM with `@Observable`:
 - `PeakLimiterConfigurator` — shared Apple peak-limiter defaults
 - `FeedbackGuard` — sustained hot-signal mute for howling protection
 - `DeviceProfileStore` — per-device UID → preset map
+- `AUv3PluginHost` — local-graph effect insert only (not system-wide)
+- Interactive `EQCurveView` — drag nodes; scroll Q in parametric mode
 - Do **not** claim a shipped virtual HAL/DriverKit device; CATap is the primary system path (see `docs/virtual-driver.md`)
 
 ## Audio Formats

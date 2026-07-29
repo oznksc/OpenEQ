@@ -144,6 +144,13 @@ final class OpenEQViewModel {
     var feedbackProtectionEnabled: Bool = AppPreferences.feedbackProtectionEnabled
     var preferSystemEQOnLaunch: Bool = AppPreferences.preferSystemEQOnLaunch
     var safetyBannerMessage: String?
+    var selectedBandID: EQBand.ID?
+    var dynamics: DynamicsSettings = .default
+    var availableAUPlugins: [AUPluginDescriptor] = []
+    var selectedAUPluginID: String?
+    var loadedAUPluginName: String?
+    var isLoadingAUPlugin = false
+    var auPluginError: String?
 
     var playbackDuration: TimeInterval {
         audioEngineController.playbackDuration
@@ -157,6 +164,7 @@ final class OpenEQViewModel {
     private let systemAudioManager: SystemAudioManager
     private let presetStore = PresetStore()
     private let deviceProfileStore = DeviceProfileStore()
+    private let auPluginHost = AUv3PluginHost()
     private var graphicBands: [EQBand]
     private var parametricBands: [EQBand]
     private var isApplyingDeviceProfile = false
@@ -210,6 +218,7 @@ final class OpenEQViewModel {
         self.audioEngineController.applyPreset(initialPreset)
         self.audioEngineController.setVolume(volume)
         self.audioEngineController.setMuted(isMuted)
+        self.audioEngineController.applyDynamics(self.dynamics)
 
         self.systemAudioManager.onPhysicalOutputChanged = { [weak self] uid, name in
             self?.handlePhysicalOutputChanged(uid: uid, name: name)
@@ -524,10 +533,116 @@ final class OpenEQViewModel {
         cacheActiveBands()
         eqMode = mode
         bands = bandsForMode(mode)
+        selectedBandID = bands.first?.id
         selectedPreset = EQPreset(name: "Custom", mode: eqMode, bands: bands, preamp: preamp)
         audioEngineController.applyPreset(selectedPreset)
         updateExternalLoopbackEQIfNeeded()
         updateSystemEQIfNeeded()
+    }
+
+    func selectBand(id: EQBand.ID) {
+        selectedBandID = id
+    }
+
+    func updateBandFromCurve(index: Int, band: EQBand) {
+        guard index >= 0, index < bands.count else { return }
+        bands[index] = band
+        selectedBandID = band.id
+        commitActiveBandsAsCustom()
+        // Full mode apply keeps graphic/parametric band counts in sync with the engine.
+        audioEngineController.applyMode(eqMode, bands: bands)
+        audioEngineController.setPreampGain(preamp)
+        updateExternalLoopbackEQIfNeeded()
+        updateSystemEQIfNeeded()
+    }
+
+    // MARK: - Dynamics
+
+    func setCompressorEnabled(_ enabled: Bool) {
+        dynamics.isCompressorEnabled = enabled
+        pushDynamics()
+    }
+
+    func setCompressorThreshold(_ value: Float) {
+        dynamics.threshold = value
+        dynamics.clamp()
+        pushDynamics()
+    }
+
+    func setCompressorRatio(_ value: Float) {
+        dynamics.ratio = value
+        dynamics.clamp()
+        pushDynamics()
+    }
+
+    func setCompressorAttack(_ value: Float) {
+        dynamics.attack = value
+        dynamics.clamp()
+        pushDynamics()
+    }
+
+    func setCompressorRelease(_ value: Float) {
+        dynamics.release = value
+        dynamics.clamp()
+        pushDynamics()
+    }
+
+    func setCompressorMakeup(_ value: Float) {
+        dynamics.makeupGain = value
+        dynamics.clamp()
+        pushDynamics()
+    }
+
+    func setStereoBalance(_ value: Float) {
+        dynamics.balance = value
+        dynamics.clamp()
+        pushDynamics()
+    }
+
+    private func pushDynamics() {
+        audioEngineController.applyDynamics(dynamics)
+    }
+
+    // MARK: - AUv3
+
+    func refreshAUPlugins() {
+        auPluginHost.refreshAvailablePlugins()
+        availableAUPlugins = auPluginHost.availablePlugins
+        auPluginError = auPluginHost.lastError
+    }
+
+    func loadSelectedAUPlugin() {
+        guard let id = selectedAUPluginID,
+              let descriptor = availableAUPlugins.first(where: { $0.id == id }) else {
+            return
+        }
+        isLoadingAUPlugin = true
+        auPluginError = nil
+        auPluginHost.loadPlugin(descriptor) { [weak self] result in
+            guard let self else { return }
+            self.isLoadingAUPlugin = false
+            switch result {
+            case .success(let unit):
+                do {
+                    try self.audioEngineController.insertAudioUnit(unit)
+                    self.loadedAUPluginName = descriptor.displayName
+                    self.auPluginError = nil
+                } catch {
+                    self.auPluginError = error.localizedDescription
+                    self.loadedAUPluginName = nil
+                }
+            case .failure(let error):
+                self.auPluginError = error.localizedDescription
+                self.loadedAUPluginName = nil
+            }
+        }
+    }
+
+    func unloadAUPlugin() {
+        audioEngineController.removeInsertedAudioUnit()
+        auPluginHost.unloadPlugin()
+        loadedAUPluginName = nil
+        auPluginError = nil
     }
 
     func gain(for bandID: EQBand.ID) -> Float {

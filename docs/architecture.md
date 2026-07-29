@@ -38,10 +38,12 @@ graph TD
 ## 3. AudioCore — local path
 
 - **AudioEngineController**
-  - Graph: `AVAudioPlayerNode` → `AVAudioUnitEQ` → peak limiter → `mainMixerNode`  
+  - Graph: `AVAudioPlayerNode` → `AVAudioUnitEQ` → dynamics processor → **optional AUv3** → peak limiter → `mainMixerNode`  
   - Reconnects on sample-rate / channel-count change  
   - Preamp via linear gain on player volume (`pow(10, dB/20)`)  
+  - Stereo balance via `mainMixerNode.pan`  
   - Limiter stays engaged when EQ is bypassed  
+- **AUv3PluginHost** — discovers effect AUs and instantiates them for the local insert slot  
 
 ## 4. AudioCore — system path
 

@@ -1,34 +1,49 @@
-//
-//  EQCurveView.swift
-//  OpenEQ
-//
-//  Created by Ozan
-//
-
 import SwiftUI
 
+/// Frequency-response curve with interactive nodes (drag gain/freq, scroll Q).
 struct EQCurveView: View {
     let bands: [EQBand]
     let mode: EQMode
     let preamp: Float
+    var selectedBandID: EQBand.ID?
+    var isInteractive: Bool = true
+    var onSelectBand: ((EQBand.ID) -> Void)?
+    var onBandChanged: ((Int, EQBand) -> Void)?
 
     private let minimumFrequency: Float = 20
     private let maximumFrequency: Float = 20_000
     private let minimumGain: Float = -24
     private let maximumGain: Float = 24
 
+    @State private var draggingBandID: EQBand.ID?
+    @State private var hoveredBandID: EQBand.ID?
+
     var body: some View {
-        Canvas { context, size in
+        GeometryReader { geometry in
             let plotRect = CGRect(
                 x: 42,
                 y: 12,
-                width: max(1, size.width - 58),
-                height: max(1, size.height - 38)
+                width: max(1, geometry.size.width - 58),
+                height: max(1, geometry.size.height - 38)
             )
 
-            drawGrid(in: plotRect, context: &context)
-            drawCurve(in: plotRect, context: &context)
-            drawBandPoints(in: plotRect, context: &context)
+            ZStack {
+                Canvas { context, size in
+                    let rect = CGRect(
+                        x: 42,
+                        y: 12,
+                        width: max(1, size.width - 58),
+                        height: max(1, size.height - 38)
+                    )
+                    drawGrid(in: rect, context: &context)
+                    drawCurve(in: rect, context: &context)
+                    drawBandPoints(in: rect, context: &context)
+                }
+
+                if isInteractive {
+                    interactionLayer(plotRect: plotRect)
+                }
+            }
         }
         .frame(height: 170)
         .background(
@@ -39,8 +54,109 @@ struct EQCurveView: View {
             RoundedRectangle(cornerRadius: 8)
                 .stroke(Color.white.opacity(0.08), lineWidth: 1)
         )
-        .accessibilityLabel("EQ curve preview showing frequency response from 20 hertz to 20 kilohertz and gain from minus 24 to plus 24 decibels.")
+        .help(isInteractive
+              ? "Drag nodes to set frequency/gain. Scroll over a node to change Q."
+              : "EQ frequency response")
+        .accessibilityLabel("EQ curve from 20 hertz to 20 kilohertz, gain minus 24 to plus 24 decibels.")
     }
+
+    private func interactionLayer(plotRect: CGRect) -> some View {
+        Color.clear
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        handleDrag(at: value.location, in: plotRect, ended: false)
+                    }
+                    .onEnded { value in
+                        handleDrag(at: value.location, in: plotRect, ended: true)
+                    }
+            )
+            .onContinuousHover { phase in
+                switch phase {
+                case .active(let location):
+                    hoveredBandID = nearestBand(at: location, in: plotRect, maxDistance: 18)?.id
+                case .ended:
+                    hoveredBandID = nil
+                }
+            }
+            .onScrollWheel { delta in
+                handleScroll(delta: delta, in: plotRect)
+            }
+    }
+
+    private func handleDrag(at point: CGPoint, in rect: CGRect, ended: Bool) {
+        guard isInteractive else { return }
+
+        if draggingBandID == nil {
+            guard let nearest = nearestBand(at: point, in: rect, maxDistance: 22),
+                  let index = bands.firstIndex(where: { $0.id == nearest.id }) else {
+                return
+            }
+            draggingBandID = nearest.id
+            onSelectBand?(nearest.id)
+            _ = index
+        }
+
+        guard let dragID = draggingBandID,
+              let index = bands.firstIndex(where: { $0.id == dragID }) else {
+            if ended { draggingBandID = nil }
+            return
+        }
+
+        var band = bands[index]
+        // Graphic mode: lock frequency to ISO centers; only gain is draggable.
+        if mode == .parametric {
+            band.frequency = frequency(atX: point.x, in: rect)
+        }
+        band.gain = gain(atY: point.y, in: rect)
+        // Snap near zero for easier flat reset.
+        if abs(band.gain) < 0.35 { band.gain = 0 }
+        onBandChanged?(index, band)
+
+        if ended {
+            draggingBandID = nil
+        }
+    }
+
+    private func handleScroll(delta: CGFloat, in rect: CGRect) {
+        guard isInteractive, mode == .parametric else { return }
+        let targetID = hoveredBandID ?? selectedBandID ?? draggingBandID
+        guard let targetID,
+              let index = bands.firstIndex(where: { $0.id == targetID }) else {
+            return
+        }
+        var band = bands[index]
+        // Trackpad scroll: positive deltaY typically means scroll up → increase Q.
+        let step = Float(delta) * 0.05
+        band.q = band.q + step
+        onBandChanged?(index, band)
+        onSelectBand?(band.id)
+    }
+
+    private func nearestBand(at point: CGPoint, in rect: CGRect, maxDistance: CGFloat) -> EQBand? {
+        var best: (EQBand, CGFloat)?
+        for band in bands {
+            let center = pointFor(band: band, in: rect)
+            let distance = hypot(center.x - point.x, center.y - point.y)
+            if distance <= maxDistance {
+                if best == nil || distance < best!.1 {
+                    best = (band, distance)
+                }
+            }
+        }
+        return best?.0
+    }
+
+    private func pointFor(band: EQBand, in rect: CGRect) -> CGPoint {
+        let gain = clampedGain(preamp + effectiveGain(for: band))
+        return CGPoint(
+            x: xPosition(for: band.frequency, in: rect),
+            y: yPosition(for: gain, in: rect)
+        )
+    }
+
+    // MARK: - Drawing
 
     private func drawGrid(in rect: CGRect, context: inout GraphicsContext) {
         let gridColor = Color.white.opacity(0.08)
@@ -108,16 +224,27 @@ struct EQCurveView: View {
 
     private func drawBandPoints(in rect: CGRect, context: inout GraphicsContext) {
         for band in bands {
-            let gain = clampedGain(preamp + effectiveGain(for: band))
-            let center = CGPoint(
-                x: xPosition(for: band.frequency, in: rect),
-                y: yPosition(for: gain, in: rect)
-            )
-            let dotRect = CGRect(x: center.x - 3, y: center.y - 3, width: 6, height: 6)
-            let color = band.isEnabled ? Color.cyan.opacity(0.85) : Color.white.opacity(0.28)
+            let center = pointFor(band: band, in: rect)
+            let isSelected = band.id == selectedBandID || band.id == draggingBandID || band.id == hoveredBandID
+            let radius: CGFloat = isSelected ? 7 : 4
+            let dotRect = CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2)
+            let color: Color = {
+                if !band.isEnabled { return Color.white.opacity(0.28) }
+                if isSelected { return Color.white }
+                return Color.cyan.opacity(0.9)
+            }()
             context.fill(Path(ellipseIn: dotRect), with: .color(color))
+            if isSelected {
+                context.stroke(
+                    Path(ellipseIn: dotRect.insetBy(dx: -2, dy: -2)),
+                    with: .color(Color.cyan.opacity(0.8)),
+                    lineWidth: 1.5
+                )
+            }
         }
     }
+
+    // MARK: - Curve math
 
     private func curveGain(at frequency: Float) -> Float {
         var gain = preamp
@@ -195,6 +322,18 @@ struct EQCurveView: View {
         return rect.maxY - rect.height * progress
     }
 
+    private func frequency(atX x: CGFloat, in rect: CGRect) -> Float {
+        let progress = Float((x - rect.minX) / max(rect.width, 1))
+        let clamped = min(max(progress, 0), 1)
+        return frequencyAt(progress: clamped)
+    }
+
+    private func gain(atY y: CGFloat, in rect: CGRect) -> Float {
+        let progress = Float((rect.maxY - y) / max(rect.height, 1))
+        let clamped = min(max(progress, 0), 1)
+        return minimumGain + clamped * (maximumGain - minimumGain)
+    }
+
     private func frequencyAt(progress: Float) -> Float {
         let minLog = log10(minimumFrequency)
         let maxLog = log10(maximumFrequency)
@@ -225,6 +364,48 @@ struct EQCurveView: View {
     }
 }
 
+// MARK: - Scroll wheel helper (AppKit)
+
+private extension View {
+    func onScrollWheel(perform: @escaping (CGFloat) -> Void) -> some View {
+        background(ScrollWheelCatcher(onScroll: perform))
+    }
+}
+
+private struct ScrollWheelCatcher: NSViewRepresentable {
+    let onScroll: (CGFloat) -> Void
+
+    func makeNSView(context: Context) -> ScrollWheelNSView {
+        let view = ScrollWheelNSView()
+        view.onScroll = onScroll
+        return view
+    }
+
+    func updateNSView(_ nsView: ScrollWheelNSView, context: Context) {
+        nsView.onScroll = onScroll
+    }
+}
+
+private final class ScrollWheelNSView: NSView {
+    var onScroll: ((CGFloat) -> Void)?
+
+    override var acceptsFirstResponder: Bool { true }
+
+    override func scrollWheel(with event: NSEvent) {
+        // Prefer precise deltas (trackpad); fall back to line-based.
+        let delta = event.hasPreciseScrollingDeltas ? event.scrollingDeltaY : event.deltaY * 10
+        if abs(delta) > 0.01 {
+            onScroll?(delta)
+        }
+        // Do not call super so parent scroll views do not steal the gesture while editing Q.
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        // Participate in hit testing so scroll events arrive here when pointer is over the curve.
+        self
+    }
+}
+
 #Preview {
     EQCurveView(
         bands: EQBand.defaultParametricBands().enumerated().map { index, band in
@@ -233,8 +414,10 @@ struct EQCurveView: View {
             return updatedBand
         },
         mode: .parametric,
-        preamp: -1
+        preamp: -1,
+        selectedBandID: nil,
+        isInteractive: true
     )
     .padding()
-    .frame(width: 900)
+    .frame(width: 900, height: 200)
 }

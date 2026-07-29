@@ -55,10 +55,22 @@ struct EqualizerView: View {
             EQCurveView(
                 bands: viewModel.bands,
                 mode: viewModel.eqMode,
-                preamp: viewModel.preamp
+                preamp: viewModel.preamp,
+                selectedBandID: viewModel.selectedBandID,
+                isInteractive: viewModel.isEnabled,
+                onSelectBand: { viewModel.selectBand(id: $0) },
+                onBandChanged: { index, band in
+                    viewModel.updateBandFromCurve(index: index, band: band)
+                }
             )
-            .frame(height: 120)
+            .frame(height: 150)
             .opacity(viewModel.isEnabled ? 1.0 : 0.4)
+
+            if viewModel.eqMode == .parametric {
+                Text("Drag nodes · scroll over a node to change Q")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
 
             if viewModel.eqMode == .graphic {
                 HStack(alignment: .center, spacing: 8) {

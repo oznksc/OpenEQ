@@ -15,9 +15,10 @@ OpenEQ is a lightweight desktop EQ for:
 
 ### Local equalizer (stable)
 - **10-band & 31-band** graphic EQ (ISO frequencies)
-- **5-band parametric EQ** (frequency, gain, Q, filter type)
+- **5-band parametric EQ** with **interactive curve** (drag nodes, scroll for Q)
 - Preamp (`-24` … `+24` dB), EQ bypass, volume boost up to 200%
-- Peak limiter on the output path (headroom safety)
+- **Dynamics:** compressor + stereo balance; peak limiter always on
+- **AUv3 insert** on the local playback chain (effect plugins)
 - Real-time **64-band FFT spectrum** (Canvas + vDSP)
 - Built-in presets + custom save/import/export (JSON)
 - Menu bar: bypass, volume, recent presets, playback controls

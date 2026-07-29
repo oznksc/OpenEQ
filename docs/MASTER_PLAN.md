@@ -42,14 +42,20 @@ Current technical status, completed work, open gaps, roadmap, and test protocols
 4. **Device-specific profiles** — UID → preset map in Application Support.
 5. **Virtual driver decision** — research doc; HAL/DriverKit deferred, not faked.
 
+### Completed in Phase 3 (DSP & parametric)
+
+1. **Interactive EQ curve** — drag frequency/gain; scroll-wheel Q on hover (parametric).
+2. **Dynamics** — Apple dynamics processor + stereo balance; brickwall peak limiter remains post-chain.
+3. **AUv3 insert** — discover/load/unload effect AUs on the local file graph.
+
 ### Remaining gaps
 
 | Gap | Severity | Target phase |
 |-----|----------|--------------|
 | Real bundled virtual output device | Medium | Phase 2.5 / later |
-| Stronger correlation-based feedback detection | Medium | Phase 2 follow-up |
-| Interactive parametric node UI | Medium | Phase 3 |
+| AUv3 on system-wide path | Medium | later |
 | AutoEQ headphone library | Medium (love feature) | Phase 4 |
+| AU view controller UI | Low | polish |
 
 ---
 
@@ -66,9 +72,8 @@ graph TD
     C --> D[Phase 3: Advanced DSP & AUv3]
     D --> E[Phase 4: AutoEQ & multi-platform]
 
-    class A,B,C done;
-    class D next;
-    class E later;
+    class A,B,C,D done;
+    class E next;
 ```
 
 ### Phase 0 — Ship the truth ✅
@@ -86,10 +91,10 @@ graph TD
 - Device-specific EQ profiles
 - HAL/DriverKit researched and deferred (see virtual-driver.md)
 
-### Phase 3 — Advanced sound design
+### Phase 3 — Advanced sound design ✅ (core)
 - Interactive parametric graph (drag nodes, scroll Q)
-- Compressor + stronger brickwall options
-- AUv3 host in the chain
+- Dynamics panel: compressor + stereo balance; peak limiter always on
+- AUv3 effect insert on **local playback** graph (system-wide AU host deferred)
 
 ### Phase 4 — Calibration & platform
 - AutoEQ (4000+ headphones)

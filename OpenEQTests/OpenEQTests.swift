@@ -512,4 +512,52 @@ final class OpenEQTests: XCTestCase {
         )
         XCTAssertEqual(withoutUID.profileKey, "id:42")
     }
+
+    // MARK: - Phase 3
+
+    func testDynamicsSettingsClamp() {
+        var settings = DynamicsSettings.default
+        settings.threshold = -100
+        settings.ratio = 100
+        settings.attack = 0
+        settings.release = 50
+        settings.makeupGain = 40
+        settings.balance = 5
+        settings.clamp()
+
+        XCTAssertEqual(settings.threshold, DynamicsSettings.thresholdRange.lowerBound)
+        XCTAssertEqual(settings.ratio, DynamicsSettings.ratioRange.upperBound)
+        XCTAssertEqual(settings.attack, DynamicsSettings.attackRange.lowerBound)
+        XCTAssertEqual(settings.release, DynamicsSettings.releaseRange.upperBound)
+        XCTAssertEqual(settings.makeupGain, DynamicsSettings.makeupRange.upperBound)
+        XCTAssertEqual(settings.balance, DynamicsSettings.balanceRange.upperBound)
+    }
+
+    func testDynamicsSettingsDefaultCompressorOff() {
+        XCTAssertFalse(DynamicsSettings.default.isCompressorEnabled)
+        XCTAssertEqual(DynamicsSettings.default.balance, 0, accuracy: 0.001)
+    }
+
+    func testAudioEngineAcceptsDynamicsWithoutCrash() throws {
+        let controller = AudioEngineController()
+        var settings = DynamicsSettings.default
+        settings.isCompressorEnabled = true
+        settings.threshold = -20
+        settings.ratio = 4
+        settings.balance = -0.25
+        controller.applyDynamics(settings)
+
+        let url = URL(fileURLWithPath: "/System/Library/Sounds/Ping.aiff")
+        try controller.prepare(url: url)
+        controller.play()
+        if case .failed(let message) = controller.playbackState {
+            XCTFail("Playback with dynamics failed: \(message)")
+        }
+        controller.stop()
+    }
+
+    func testFourCharCodeString() {
+        let code: FourCharCode = 0x61756678 // 'aufx'
+        XCTAssertEqual(code.fourCharString, "aufx")
+    }
 }

@@ -30,7 +30,9 @@ final class AudioEngineController {
     private let player = AVAudioPlayerNode()
     private let eq = AVAudioUnitEQ(numberOfBands: 31)
     private let analyzer = SpectrumAnalyzer()
+    private let compressor: AVAudioUnitEffect
     private let limiter: AVAudioUnitEffect
+    private var insertedAU: AVAudioUnit?
     
     private var audioFile: AVAudioFile?
     private var currentFileURL: URL?
@@ -38,8 +40,19 @@ final class AudioEngineController {
     private var isTapInstalled = false
     private var lastProcessingFormat: AVAudioFormat?
     private var playbackGeneration: UInt64 = 0
+    private var dynamics = DynamicsSettings.default
+    private var stereoBalance: Float = 0
 
     init() {
+        let compressorDesc = AudioComponentDescription(
+            componentType: kAudioUnitType_Effect,
+            componentSubType: kAudioUnitSubType_DynamicsProcessor,
+            componentManufacturer: kAudioUnitManufacturer_Apple,
+            componentFlags: 0,
+            componentFlagsMask: 0
+        )
+        compressor = AVAudioUnitEffect(audioComponentDescription: compressorDesc)
+
         let limiterDesc = AudioComponentDescription(
             componentType: kAudioUnitType_Effect,
             componentSubType: kAudioUnitSubType_PeakLimiter,
@@ -49,7 +62,10 @@ final class AudioEngineController {
         )
         limiter = AVAudioUnitEffect(audioComponentDescription: limiterDesc)
         configureEQ()
+        configureCompressor()
         configureLimiter()
+        applyDynamics(dynamics)
+        applyBalance(0)
     }
     
     deinit {
@@ -93,6 +109,11 @@ final class AudioEngineController {
         PeakLimiterConfigurator.applyDefaults(to: limiter)
     }
 
+    private func configureCompressor() {
+        // Defaults applied via applyDynamics; ensure unit is not bypassed by accident.
+        compressor.bypass = true
+    }
+
     private func attachNodesIfNeeded() {
         if player.engine == nil {
             engine.attach(player)
@@ -100,6 +121,14 @@ final class AudioEngineController {
 
         if eq.engine == nil {
             engine.attach(eq)
+        }
+
+        if compressor.engine == nil {
+            engine.attach(compressor)
+        }
+
+        if let insertedAU, insertedAU.engine == nil {
+            engine.attach(insertedAU)
         }
 
         if limiter.engine == nil {
@@ -117,14 +146,26 @@ final class AudioEngineController {
         if isGraphConnected {
             engine.disconnectNodeOutput(player)
             engine.disconnectNodeOutput(eq)
+            engine.disconnectNodeOutput(compressor)
+            if let insertedAU {
+                engine.disconnectNodeOutput(insertedAU)
+            }
             engine.disconnectNodeOutput(limiter)
             isGraphConnected = false
         }
 
+        // player → EQ → compressor → [optional AU] → peak limiter → mixer
         engine.connect(player, to: eq, format: format)
-        engine.connect(eq, to: limiter, format: format)
+        engine.connect(eq, to: compressor, format: format)
+        if let insertedAU {
+            engine.connect(compressor, to: insertedAU, format: format)
+            engine.connect(insertedAU, to: limiter, format: format)
+        } else {
+            engine.connect(compressor, to: limiter, format: format)
+        }
         engine.connect(limiter, to: engine.mainMixerNode, format: format)
         isGraphConnected = true
+        applyBalance(stereoBalance)
     }
 
     private func startEngineIfNeeded() throws {
@@ -372,9 +413,18 @@ final class AudioEngineController {
         if isGraphConnected {
             engine.disconnectNodeOutput(player)
             engine.disconnectNodeOutput(eq)
+            engine.disconnectNodeOutput(compressor)
+            if let insertedAU {
+                engine.disconnectNodeOutput(insertedAU)
+            }
             engine.disconnectNodeOutput(limiter)
             isGraphConnected = false
         }
+
+        if let insertedAU, insertedAU.engine != nil {
+            engine.detach(insertedAU)
+        }
+        insertedAU = nil
 
         if player.engine != nil {
             engine.detach(player)
@@ -382,6 +432,10 @@ final class AudioEngineController {
 
         if eq.engine != nil {
             engine.detach(eq)
+        }
+
+        if compressor.engine != nil {
+            engine.detach(compressor)
         }
 
         if limiter.engine != nil {
@@ -439,8 +493,78 @@ final class AudioEngineController {
     func setBypass(_ bypass: Bool) {
         // Keep the peak limiter engaged even when EQ is bypassed so volume
         // boost and preamp cannot hard-clip the output path.
+        // Compressor enable is independent of EQ A/B bypass.
         eq.bypass = bypass
+        compressor.bypass = !dynamics.isCompressorEnabled
         limiter.bypass = false
+    }
+
+    func applyDynamics(_ settings: DynamicsSettings) {
+        var clamped = settings
+        clamped.clamp()
+        dynamics = clamped
+        compressor.bypass = !clamped.isCompressorEnabled
+
+        guard let tree = compressor.auAudioUnit.parameterTree else { return }
+        for param in tree.allParameters {
+            switch param.identifier {
+            case "threshold", "Threshold":
+                param.value = clamped.threshold
+            case "headRoom", "HeadRoom":
+                // Leave a little headroom relative to threshold.
+                param.value = max(0.1, min(40, abs(clamped.threshold) * 0.35 + 3))
+            case "expansionRatio", "ExpansionRatio":
+                // Use expansion ratio slot as compression ratio on Apple's unit mapping.
+                param.value = clamped.ratio
+            case "attackTime", "AttackTime":
+                param.value = clamped.attack
+            case "releaseTime", "ReleaseTime":
+                param.value = clamped.release
+            case "masterGain", "MasterGain":
+                param.value = clamped.makeupGain
+            default:
+                break
+            }
+        }
+
+        applyBalance(clamped.balance)
+    }
+
+    func applyBalance(_ balance: Float) {
+        stereoBalance = min(max(balance, -1), 1)
+        engine.mainMixerNode.pan = stereoBalance
+    }
+
+    /// Inserts an already-instantiated AU effect into the local graph (after compressor).
+    func insertAudioUnit(_ unit: AVAudioUnit) throws {
+        if let existing = insertedAU, existing.engine != nil {
+            engine.disconnectNodeOutput(existing)
+            engine.detach(existing)
+        }
+        insertedAU = unit
+        if let format = lastProcessingFormat {
+            try connectGraph(format: format)
+            try startEngineIfNeeded()
+        } else {
+            attachNodesIfNeeded()
+        }
+        logger.info("Inserted AU unit into local graph")
+    }
+
+    func removeInsertedAudioUnit() {
+        guard let existing = insertedAU else { return }
+        if isGraphConnected {
+            engine.disconnectNodeOutput(existing)
+        }
+        if existing.engine != nil {
+            engine.detach(existing)
+        }
+        insertedAU = nil
+        if let format = lastProcessingFormat {
+            try? connectGraph(format: format)
+            try? startEngineIfNeeded()
+        }
+        logger.info("Removed AU unit from local graph")
     }
 
     func setVolumeBoost(_ multiplier: Double) {

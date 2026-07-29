@@ -97,9 +97,9 @@ gantt
 
 ---
 
-## 🎛️ PHASE 3: Advanced DSP and Parametric Equalizer (Q2 2027)
+## ✅ PHASE 3: Advanced DSP and Parametric Equalizer (core complete)
 
-**Focus:** Moving beyond graphic EQ limitations by offering professional-grade parametric filtering and external plugin hosting.
+**Focus:** Interactive parametric editing, dynamics processing, and AUv3 insert on the local playback path.
 
 ```
        Gain (dB)
@@ -113,17 +113,20 @@ gantt
              20Hz     100Hz     1kHz      10kHz
 ```
 
-### 3.1. Fully Interactive Parametric EQ UI
-*   **Node Dragging:** Drag EQ points directly on a graph along the vertical axis (Gain) and horizontal axis (Frequency) for intuitive tuning.
-*   **Scroll-to-Q:** Alter filter widths (Q factor) dynamically using the trackpad/scroll wheel while hovering over an EQ node.
+### 3.1. Fully Interactive Parametric EQ UI (shipped)
+*   **Node Dragging:** Drag EQ points on the curve (frequency + gain; graphic mode locks frequency).
+*   **Scroll-to-Q:** Trackpad/mouse wheel over a node adjusts Q in parametric mode.
+*   Selected / hovered nodes are highlighted on the curve.
 
-### 3.2. Professional Dynamics Processing
-*   **vDSP-powered Compressor:** Squeeze the dynamic range of audio to improve vocal clarity and balance audio levels.
-*   **Brickwall Limiter:** A fast-acting peak limiter at the output stage to guarantee 100% prevention of digital clipping.
-*   **Stereo Panning & Balance:** Independent gain and delay control for left and right channels to customize stereo imaging.
+### 3.2. Professional Dynamics Processing (shipped)
+*   **Compressor:** Apple `DynamicsProcessor` AU with threshold, ratio, attack, release, makeup.
+*   **Brickwall Limiter:** Existing peak limiter remains always-on after compressor / AU insert.
+*   **Stereo Balance:** `mainMixerNode.pan` control in the Dynamics panel.
 
-### 3.3. AUv3 (Audio Unit v3) Host Infrastructure
-*   Host third-party Audio Units (e.g., FabFilter, Valhalla plugins) within the OpenEQ signal chain, allowing users to apply custom DSP effects directly to system audio.
+### 3.3. AUv3 Host Infrastructure (local path shipped)
+*   Discover installed effect Audio Units, load/unload into the **local** graph:  
+    `player → EQ → compressor → [AU] → peak limiter → mixer`
+*   System-wide AU hosting deferred (process-tap DSP path does not host AUs yet).
 
 ---
 
