@@ -2,158 +2,75 @@ import SwiftUI
 
 struct MainWindowView: View {
     @Bindable var viewModel: OpenEQViewModel
-    @State private var columnVisibility: NavigationSplitViewVisibility = .all
+    @State private var selectedTab: MainTab = .equalizer
+    private var graphStore: GraphStore { viewModel.graphStore }
+
+    enum MainTab: String, CaseIterable, Identifiable {
+        case equalizer, routing, library, system
+        var id: Self { self }
+        var title: String { [Self.equalizer: "Equalizer", .routing: "Routing", .library: "Library", .system: "System Audio"][self]! }
+        var icon: String { [Self.equalizer: "slider.vertical.3", .routing: "point.3.connected.trianglepath.dotted", .library: "square.stack", .system: "waveform"][self]! }
+    }
 
     var body: some View {
-        NavigationSplitView(columnVisibility: $columnVisibility) {
-            SidebarView(viewModel: viewModel)
-                .navigationSplitViewColumnWidth(
-                    min: OpenEQTheme.minSidebarWidth,
-                    ideal: OpenEQTheme.idealSidebarWidth,
-                    max: OpenEQTheme.maxSidebarWidth
-                )
-        } detail: {
-            detailColumn
+        Group {
+            switch selectedTab {
+            case .equalizer: equalizerPage
+            case .routing: routingPage
+            case .library: libraryPage
+            case .system: SystemAudioView(viewModel: viewModel)
+            }
         }
-        .navigationSplitViewStyle(.balanced)
-        // Keep toolbar chrome in the system safe area so sidebar search / content
-        // sit below traffic lights and window toolbar actions.
+        .frame(width: OpenEQTheme.minWindowWidth, height: OpenEQTheme.minWindowHeight)
         .toolbarTitleDisplayMode(.inline)
         .toolbar { toolbarContent }
-        .sheet(isPresented: $viewModel.isShowingSystemAudio) {
-            SystemAudioView(viewModel: viewModel)
+        .inspector(isPresented: $viewModel.showGraphInspector) {
+            NodeInspectorView(store: graphStore, viewModel: viewModel)
+                .inspectorColumnWidth(min: 300, ideal: 320, max: 380)
         }
+        .onAppear { viewModel.refreshAudioProcesses() }
     }
 
-    /// Single flat surface: spectrum → EQ → glass player. No content cards.
-    private var detailColumn: some View {
-        VStack(spacing: 0) {
-            ScrollView(.vertical, showsIndicators: false) {
-                VStack(alignment: .leading, spacing: OpenEQTheme.blockSpacing) {
-                    SpectrumView(
-                        title: viewModel.spectrumTitle,
-                        warning: viewModel.spectrumWarning,
-                        levels: viewModel.spectrumLevels,
-                        leftLevel: viewModel.leftLevel,
-                        rightLevel: viewModel.rightLevel,
-                        peakLevel: viewModel.peakLevel,
-                        isClipping: viewModel.isClipping
-                    )
-                    .frame(minHeight: 180)
-
-                    EqualizerView(viewModel: viewModel)
-                }
-                .padding(OpenEQTheme.pagePadding)
-                .padding(.bottom, 8)
-                .frame(maxWidth: .infinity, alignment: .leading)
+    private var equalizerPage: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                PlayerControlsView(viewModel: viewModel)
+                EqualizerView(viewModel: viewModel)
+                SpectrumView(title: viewModel.spectrumTitle, warning: viewModel.spectrumWarning, levels: viewModel.spectrumLevels, leftLevel: viewModel.leftLevel, rightLevel: viewModel.rightLevel, peakLevel: viewModel.peakLevel, isClipping: viewModel.isClipping)
             }
-
-            PlayerControlsView(viewModel: viewModel)
-                .padding(.horizontal, OpenEQTheme.pagePadding)
-                .padding(.bottom, OpenEQTheme.pagePadding)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .navigationTitle(detailTitle)
-        .navigationSubtitle(detailSubtitle)
+            .padding(24).frame(maxWidth: 1100, alignment: .leading).frame(maxWidth: .infinity)
+        }.navigationTitle("Equalizer")
     }
 
-    @ToolbarContentBuilder
-    private var toolbarContent: some ToolbarContent {
-        ToolbarItem(placement: .navigation) {
-            HStack(spacing: 6) {
-                OpenEQStatusDot(kind: statusKind)
-                Text(statusLabel)
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(.secondary)
-                    .monospaced()
-            }
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel(statusLabel)
-        }
+    private var routingPage: some View {
+        GraphWorkspaceView(viewModel: viewModel, store: graphStore)
+            .navigationTitle("Routing")
+            .toolbar { ToolbarItem(placement: .primaryAction) { Button { viewModel.showGraphInspector.toggle() } label: { Image(systemName: "sidebar.trailing") }.help("Inspector") } }
+    }
 
+    private var libraryPage: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 22) {
+                Text("Presets and tools").font(.title2.weight(.semibold))
+                GroupBox("Presets") { PresetPanelView(viewModel: viewModel).padding(12) }
+                GroupBox("Headphone profiles") { HeadphoneLibraryView(viewModel: viewModel, searchText: .constant("")).padding(12) }
+                GroupBox("Dynamics") { DynamicsPanelView(viewModel: viewModel).padding(12) }
+                GroupBox("Audio Units") { AUv3PanelView(viewModel: viewModel).padding(12) }
+            }.padding(24).frame(maxWidth: 760, alignment: .leading).frame(maxWidth: .infinity)
+        }.navigationTitle("Library")
+    }
+
+    @ToolbarContentBuilder private var toolbarContent: some ToolbarContent {
+        ToolbarItem(placement: .principal) {
+            Picker("Section", selection: $selectedTab) {
+                ForEach(MainTab.allCases) { tab in Label(tab.title, systemImage: tab.icon).tag(tab) }
+            }.pickerStyle(.segmented).controlSize(.small).frame(width: 420).labelsHidden()
+        }
         ToolbarItemGroup(placement: .primaryAction) {
-            Button {
-                viewModel.setEnabled(!viewModel.isEnabled)
-            } label: {
-                Label(
-                    viewModel.isEnabled ? "EQ On" : "Bypassed",
-                    systemImage: viewModel.isEnabled ? "power.circle.fill" : "power.circle"
-                )
-            }
-            .help(viewModel.isEnabled ? "Bypass EQ (⌘B)" : "Enable EQ (⌘B)")
-            .tint(viewModel.isEnabled ? .green : .orange)
-
-            Button {
-                viewModel.resetEQ()
-            } label: {
-                Label("Reset", systemImage: "arrow.counterclockwise")
-            }
-            .help("Reset EQ (⌘R)")
-        }
-
-        ToolbarItem(placement: .confirmationAction) {
-            Button {
-                viewModel.toggleSystemEQOneClick()
-            } label: {
-                Label(
-                    viewModel.isSystemEQActive ? "System EQ On" : "System EQ",
-                    systemImage: viewModel.isSystemEQActive ? "waveform.circle.fill" : "waveform.circle"
-                )
-            }
-            .tint(viewModel.isSystemEQActive ? .green : nil)
-            .help(viewModel.isSystemEQActive ? "Stop system-wide EQ" : "Start system-wide EQ")
-        }
-
-        ToolbarItem(placement: .automatic) {
-            Button {
-                viewModel.isShowingSystemAudio = true
-            } label: {
-                Label("System Audio", systemImage: "gearshape")
-            }
-            .help("System audio settings")
-        }
-    }
-
-    private var detailTitle: String {
-        if viewModel.isSystemEQActive { return "System EQ" }
-        if viewModel.selectedFileURL != nil { return viewModel.selectedFileName }
-        return "Equalizer"
-    }
-
-    private var detailSubtitle: String {
-        if !viewModel.isEnabled { return "Bypassed" }
-        return "\(viewModel.eqMode.title) · \(viewModel.selectedPreset.name)"
-    }
-
-    private var statusLabel: String {
-        if viewModel.didTripFeedbackProtection { return "FEEDBACK" }
-        if viewModel.isSystemEQActive {
-            return viewModel.isEnabled ? "SYSTEM EQ" : "SYSTEM · BYPASS"
-        }
-        if viewModel.isExternalLoopbackActive { return "LOOPBACK" }
-        return viewModel.playbackState.title.uppercased()
-    }
-
-    private var statusKind: OpenEQStatusDot.Kind {
-        if viewModel.didTripFeedbackProtection { return .warning }
-        if !viewModel.isEnabled && (viewModel.isSystemEQActive || viewModel.isExternalLoopbackActive) {
-            return .bypassed
-        }
-        if viewModel.isSystemEQActive || viewModel.isExternalLoopbackActive { return .active }
-        if case .failed = viewModel.systemAudioStatus { return .error }
-        if viewModel.systemAudioStatus == .permissionRequired { return .warning }
-        switch viewModel.playbackState {
-        case .playing: return .active
-        case .paused, .preparing, .ready: return .ready
-        case .failed: return .error
-        case .stopped, .idle: return .idle
+            Button { viewModel.setEnabled(!viewModel.isEnabled) } label: { Label(viewModel.isEnabled ? "EQ" : "Bypass", systemImage: viewModel.isEnabled ? "power.circle.fill" : "power.circle") }.tint(viewModel.isEnabled ? .green : .orange)
+            Button { viewModel.resetEQ() } label: { Label("Reset", systemImage: "arrow.counterclockwise") }
         }
     }
 }
 
-#Preview {
-    MainWindowView(
-        viewModel: OpenEQViewModel(audioEngineController: AudioEngineController())
-    )
-    .frame(width: 1100, height: 700)
-}
+#Preview { MainWindowView(viewModel: OpenEQViewModel(audioEngineController: AudioEngineController())).frame(width: 1280, height: 800) }

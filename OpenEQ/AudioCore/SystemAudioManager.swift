@@ -155,6 +155,15 @@ final class SystemAudioManager {
     }
 
     func startSystemEQ(preset: EQPreset) {
+        startSystemEQ(preset: preset, target: .systemExcludingSelf, preferredOutputUID: nil)
+    }
+
+    /// Starts process-tap EQ for system-wide or a specific app target from the graph.
+    func startSystemEQ(
+        preset: EQPreset,
+        target: ProcessTapTarget,
+        preferredOutputUID: String? = nil
+    ) {
         stopActive()
         mode = .systemEQ
         lastSystemEQPreset = preset
@@ -170,7 +179,11 @@ final class SystemAudioManager {
         }
 
         systemAudioEQEngine.setFeedbackProtectionEnabled(AppPreferences.feedbackProtectionEnabled)
-        systemAudioEQEngine.start(with: preset)
+        systemAudioEQEngine.start(
+            with: preset,
+            target: target,
+            preferredOutputUID: preferredOutputUID
+        )
         systemAudioEQEngine.setBypassed(isSystemAudioBypassed)
         systemAudioLatency = systemAudioEQEngine.latencyEstimate
         activePhysicalOutputUID = systemAudioEQEngine.physicalOutputUID

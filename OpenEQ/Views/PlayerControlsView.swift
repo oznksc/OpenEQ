@@ -6,7 +6,8 @@ struct PlayerControlsView: View {
     @Bindable var viewModel: OpenEQViewModel
 
     @State private var currentTime: Double = 0.0
-    private let timer = Timer.publish(every: 0.1, on: .main, in: .common).autoconnect()
+    // 8 Hz is enough for transport UI; lower main-thread wakeups.
+    private let timer = Timer.publish(every: 0.125, on: .main, in: .common).autoconnect()
 
     var body: some View {
         let duration = max(viewModel.playbackDuration, 1)
@@ -16,14 +17,14 @@ struct PlayerControlsView: View {
                 errorBanner(error)
             }
 
-            let controlRow = HStack(spacing: 20) {
+            let controlRow = HStack(spacing: 16) {
                 fileInfo
                 transport
                 progress(duration: duration)
                 volume
             }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 14)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
 
             if #available(macOS 26.0, *) {
                 controlRow.glassEffect(
@@ -68,6 +69,7 @@ struct PlayerControlsView: View {
             }
             .buttonStyle(.borderless)
             .help("Open Audio (⌘O)")
+            .accessibilityLabel("Open audio file")
 
             Button {
                 viewModel.stop()
@@ -78,6 +80,7 @@ struct PlayerControlsView: View {
             .buttonStyle(.borderless)
             .disabled(viewModel.selectedFileURL == nil)
             .help("Stop")
+            .accessibilityLabel("Stop")
 
             Button {
                 if viewModel.playbackState == .playing {
@@ -92,6 +95,7 @@ struct PlayerControlsView: View {
             .buttonStyle(.borderless)
             .disabled(viewModel.selectedFileURL == nil)
             .help(viewModel.playbackState == .playing ? "Pause" : "Play")
+            .accessibilityLabel(viewModel.playbackState == .playing ? "Pause" : "Play")
         }
         .imageScale(.medium)
         .foregroundStyle(.primary)
@@ -113,6 +117,8 @@ struct PlayerControlsView: View {
             )
             .controlSize(.small)
             .disabled(viewModel.selectedFileURL == nil)
+            .accessibilityLabel("Playback position")
+            .accessibilityValue("\(formatTime(currentTime)) of \(formatTime(viewModel.playbackDuration))")
 
             Text(formatTime(viewModel.playbackDuration))
                 .font(.caption.monospacedDigit())
@@ -132,6 +138,7 @@ struct PlayerControlsView: View {
             .buttonStyle(.borderless)
             .foregroundStyle(viewModel.isMuted ? .red : .primary)
             .help(viewModel.isMuted ? "Unmute" : "Mute")
+            .accessibilityLabel(viewModel.isMuted ? "Unmute" : "Mute")
 
             Slider(
                 value: Binding(
@@ -145,6 +152,8 @@ struct PlayerControlsView: View {
             )
             .controlSize(.small)
             .frame(width: 88)
+            .accessibilityLabel("Volume")
+            .accessibilityValue("\(Int((viewModel.isMuted ? 0 : viewModel.volume) * 100)) percent")
 
             Button {
                 viewModel.toggleVolumeBoost()
@@ -154,6 +163,7 @@ struct PlayerControlsView: View {
             .buttonStyle(.borderless)
             .foregroundStyle(viewModel.isVolumeBoostEnabled ? .yellow : .secondary)
             .help(viewModel.isVolumeBoostEnabled ? "Boost on" : "Volume boost")
+            .accessibilityLabel(viewModel.isVolumeBoostEnabled ? "Disable volume boost" : "Enable volume boost")
         }
     }
 

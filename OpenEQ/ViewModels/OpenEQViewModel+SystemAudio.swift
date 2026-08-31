@@ -1,4 +1,5 @@
 import Foundation
+import CoreGraphics
 
 extension OpenEQViewModel {
     // MARK: - System Audio
@@ -71,26 +72,209 @@ extension OpenEQViewModel {
 
     func stopSystemEQMode() {
         systemAudioManager.stopSystemEQ()
+        if !isExternalLoopbackActive {
+            clearGraphRuntimeState()
+        }
         syncSystemAudioState()
     }
 
     func enableSystemEQOneClick() {
-        isShowingSystemAudio = true
-        if systemAudioMode != .systemEQ {
-            systemAudioManager.setMode(.systemEQ)
-            syncSystemAudioState()
-        }
-        startSystemEQMode()
+        ensureSystemChainInGraph()
+        runGraph(preferProcess: true)
     }
 
     func toggleSystemEQOneClick() {
-        if isSystemEQActive {
-            stopSystemEQMode()
-            systemAudioManager.setMode(.disabled)
-            syncSystemAudioState()
+        if isSystemEQActive || isExternalLoopbackActive {
+            stopGraph()
         } else {
             enableSystemEQOneClick()
         }
+    }
+
+    // MARK: - Graph runtime
+
+    /// Starts the preferred graph chain (app/system process tap, or input monitor).
+    func runGraph(preferProcess: Bool = false) {
+        refreshAudioProcesses()
+        graphStore.revalidate()
+
+        let document = graphStore.document
+        let selection: (GraphChain, GraphRuntime.RunKind)?
+        if preferProcess,
+           let process = GraphValidation.compileChains(document).first(where: {
+               $0.sourceKind == .system || $0.sourceKind == .app
+           }),
+           let kind = GraphRuntime.resolveProcessKind(chain: process, document: document) {
+            selection = (process, kind)
+        } else {
+            selection = GraphRuntime.preferredRun(from: document)
+        }
+
+        guard let (chain, kind) = selection else {
+            errorMessage = storeFriendlyGraphError()
+            safetyBannerMessage = errorMessage
+            return
+        }
+
+        let preset = GraphRuntime.equalizerPreset(
+            for: chain,
+            document: document,
+            fallback: currentActivePreset()
+        )
+        applyPresetFromGraph(preset)
+        let eqEnabled = GraphRuntime.isEqualizerEnabled(for: chain, document: document)
+        setEnabled(eqEnabled)
+
+        switch kind {
+        case .process(let target, let outputUID, let label):
+            stop()
+            systemAudioManager.clearPermissionBlock()
+            systemAudioManager.setSystemAudioBypassed(!isEnabled)
+            systemAudioManager.setFeedbackProtectionEnabled(feedbackProtectionEnabled)
+            systemAudioManager.startSystemEQ(
+                preset: currentActivePreset(),
+                target: target,
+                preferredOutputUID: outputUID
+            )
+            syncSystemAudioState()
+            applyDeviceProfileIfNeeded(forUID: systemAudioManager.activePhysicalOutputUID)
+            updateGraphRuntimeState(chain: chain, label: label)
+
+            if case .failed(let message) = systemAudioStatus {
+                errorMessage = message
+                safetyBannerMessage = message
+                isShowingSystemAudio = true
+                clearGraphRuntimeState()
+            } else if systemAudioStatus == .permissionRequired {
+                errorMessage = nil
+                safetyBannerMessage = "Enable Screen & System Audio Recording for this OpenEQ build, then press Run again."
+                isShowingSystemAudio = true
+                clearGraphRuntimeState()
+            } else {
+                errorMessage = nil
+                safetyBannerMessage = nil
+                completeSystemEQOnboardingIfNeeded()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) { [weak self] in
+                    self?.syncSystemAudioState()
+                }
+            }
+
+        case .input(let inputUID, let outputUID, let label):
+            stop()
+            let inputDevice = resolveInputDevice(uid: inputUID)
+            let outputDevice = resolveOutputDevice(uid: outputUID)
+            systemAudioManager.selectInputDevice(inputDevice)
+            systemAudioManager.selectOutputDevice(outputDevice)
+            systemAudioManager.setExternalLoopbackBypassed(!isEnabled)
+            systemAudioManager.setFeedbackProtectionEnabled(feedbackProtectionEnabled)
+            systemAudioManager.startExternalLoopback(preset: currentActivePreset())
+            syncSystemAudioState()
+            updateGraphRuntimeState(chain: chain, label: "Mic monitor · \(label)")
+
+            if case .failed(let message) = systemAudioStatus {
+                errorMessage = message
+                safetyBannerMessage = message
+                clearGraphRuntimeState()
+            } else {
+                errorMessage = nil
+                safetyBannerMessage = "Microphone monitor path — not injected into other apps."
+            }
+        }
+    }
+
+    func stopGraph() {
+        stopSystemEQMode()
+        stopExternalLoopbackMode()
+        systemAudioManager.setMode(.disabled)
+        clearGraphRuntimeState()
+        syncSystemAudioState()
+    }
+
+    func toggleGraph() {
+        if isSystemEQActive || isExternalLoopbackActive {
+            stopGraph()
+        } else {
+            runGraph()
+        }
+    }
+
+    /// Ensures a System Audio → EQ → Output chain exists for one-click / toolbar.
+    func ensureSystemChainInGraph() {
+        let chains = graphStore.runnableChains
+        if chains.contains(where: { $0.sourceKind == .system || $0.sourceKind == .app }) {
+            return
+        }
+        // Promote starter or add a system chain.
+        if graphStore.document.nodes.isEmpty {
+            graphStore.resetToStarter()
+            return
+        }
+        let hasSystem = graphStore.document.nodes.contains { $0.kind == .systemSource }
+        let hasEQ = graphStore.document.nodes.contains { $0.kind == .equalizer }
+        let hasOut = graphStore.document.nodes.contains { $0.kind == .output }
+        if !hasSystem {
+            _ = graphStore.addNode(kind: .systemSource, at: CGPoint(x: 80, y: 180))
+        }
+        if !hasEQ {
+            _ = graphStore.addNode(kind: .equalizer, at: CGPoint(x: 320, y: 160))
+        }
+        if !hasOut {
+            _ = graphStore.addNode(kind: .output, at: CGPoint(x: 580, y: 180))
+        }
+        if let system = graphStore.document.nodes.first(where: { $0.kind == .systemSource }),
+           let eq = graphStore.document.nodes.first(where: { $0.kind == .equalizer }),
+           let output = graphStore.document.nodes.first(where: { $0.kind == .output }) {
+            if graphStore.document.edges(from: system.id).isEmpty {
+                _ = graphStore.connect(from: system.portID(name: "out"), to: eq.portID(name: "in"))
+            }
+            if graphStore.document.edges(from: eq.id).isEmpty {
+                _ = graphStore.connect(from: eq.portID(name: "out"), to: output.portID(name: "in"))
+            }
+        }
+    }
+
+    private func applyPresetFromGraph(_ preset: EQPreset) {
+        isApplyingGraphEQ = true
+        defer { isApplyingGraphEQ = false }
+        selectedPreset = preset
+        eqMode = preset.mode
+        bands = preset.bands
+        preamp = preset.preamp
+        cacheActiveBands()
+        audioEngineController.applyPreset(preset)
+    }
+
+    private func updateGraphRuntimeState(chain: GraphChain, label: String) {
+        runningGraphNodeIDsOverride = Set(chain.nodeIDs)
+        graphRuntimeLabel = label
+    }
+
+    private func clearGraphRuntimeState() {
+        runningGraphNodeIDsOverride = []
+        graphRuntimeLabel = nil
+    }
+
+    private func storeFriendlyGraphError() -> String {
+        if let issue = graphStore.lastValidationIssues.first {
+            return issue.message
+        }
+        return "Connect App/System or Microphone → Equalizer → Output, then Run."
+    }
+
+    private func resolveInputDevice(uid: String?) -> AudioDevice? {
+        guard let uid, !uid.isEmpty else {
+            return systemAudioManager.getDefaultInputDevice()
+        }
+        return availableInputDevices.first { ($0.uid ?? $0.profileKey) == uid }
+            ?? systemAudioManager.getDefaultInputDevice()
+    }
+
+    private func resolveOutputDevice(uid: String?) -> AudioDevice? {
+        guard let uid, !uid.isEmpty else {
+            return systemAudioManager.getDefaultOutputDevice()
+        }
+        return availableOutputDevices.first { ($0.uid ?? $0.profileKey) == uid }
+            ?? systemAudioManager.getDefaultOutputDevice()
     }
 
     func completeSystemEQOnboardingIfNeeded() {
@@ -201,12 +385,18 @@ extension OpenEQViewModel {
 
     func stopExternalLoopbackMode() {
         systemAudioManager.stopExternalLoopback()
+        if !isSystemEQActive {
+            clearGraphRuntimeState()
+        }
         syncSystemAudioState()
     }
 
     func shutdown() {
         stop()
         systemAudioManager.stop()
+        processEnumerator.stop()
+        clearGraphRuntimeState()
+        graphStore.saveToDisk()
         syncSystemAudioState()
     }
 
@@ -214,6 +404,7 @@ extension OpenEQViewModel {
         systemAudioManager.enterSafeMode()
         isEnabled = true
         audioEngineController.setBypass(false)
+        clearGraphRuntimeState()
         syncSystemAudioState()
         errorMessage = nil
     }

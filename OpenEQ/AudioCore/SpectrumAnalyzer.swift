@@ -211,9 +211,31 @@ final class SpectrumAnalyzer {
         )
     }
 
+    func analyze(
+        left: UnsafePointer<Float>,
+        right: UnsafePointer<Float>?,
+        frameLength: Int,
+        sampleRate: Double
+    ) -> SpectrumAnalysis? {
+        guard frameLength >= fftSize else { return nil }
+        updateBinRangesIfNeeded(sampleRate: sampleRate)
+        let leftPeak = peak(in: left, frameLength: frameLength)
+        let rightPeak = right.map { peak(in: $0, frameLength: frameLength) } ?? leftPeak
+        if let right {
+            for index in 0..<fftSize {
+                monoSamples[index] = (left[index] + right[index]) * 0.5
+            }
+        } else {
+            monoSamples.withUnsafeMutableBufferPointer { destination in
+                destination.baseAddress?.update(from: left, count: fftSize)
+            }
+        }
+        return analyzePreparedMonoSamples(leftPeak: leftPeak, rightPeak: rightPeak)
+    }
+
     func reset() -> SpectrumAnalysis {
-        previousLevels = [Float](repeating: 0.0, count: Self.barCount)
-        smoothedLevels = [Float](repeating: 0.0, count: Self.barCount)
+        previousLevels.withUnsafeMutableBufferPointer { $0.update(repeating: 0) }
+        smoothedLevels.withUnsafeMutableBufferPointer { $0.update(repeating: 0) }
         return SpectrumAnalysis(
             levels: SpectrumLevels(smoothedLevels),
             leftPeak: 0.0,

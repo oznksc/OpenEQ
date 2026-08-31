@@ -25,8 +25,8 @@ struct OpenEQApp: App {
                     viewModel.handleAppLaunch()
                 }
         }
-        .windowResizability(.contentMinSize)
-        .defaultSize(width: 1180, height: 760)
+        .windowResizability(.contentSize)
+        .defaultSize(width: OpenEQTheme.minWindowWidth, height: OpenEQTheme.minWindowHeight)
         .windowToolbarStyle(.unified)
         .commands {
             CommandGroup(replacing: .newItem) {

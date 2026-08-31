@@ -15,7 +15,9 @@ struct EqualizerView: View {
                     .toggleStyle(.switch)
                     .controlSize(.small)
                     .labelsHidden()
-                    .help("Toggle EQ")
+                    .help("Toggle EQ (⌘B)")
+                    .accessibilityLabel("Equalizer")
+                    .accessibilityValue(viewModel.isEnabled ? "On" : "Off")
 
                 Picker("Mode", selection: Binding(
                     get: { viewModel.eqMode },
@@ -28,6 +30,7 @@ struct EqualizerView: View {
                 .pickerStyle(.segmented)
                 .frame(maxWidth: 200)
                 .labelsHidden()
+                .accessibilityLabel("EQ mode")
 
                 if viewModel.eqMode == .graphic {
                     Picker("Bands", selection: bandCountBinding) {
@@ -38,6 +41,7 @@ struct EqualizerView: View {
                     .pickerStyle(.segmented)
                     .frame(maxWidth: 140)
                     .labelsHidden()
+                    .accessibilityLabel("Band count")
                 }
             }
 
@@ -140,6 +144,20 @@ struct EqualizerView: View {
         }
         .frame(width: 40)
         .onTapGesture(count: 2) { viewModel.updatePreamp(gain: 0) }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Preamp")
+        .accessibilityValue(String(format: "%+.1f dB", viewModel.preamp))
+        .accessibilityAdjustableAction { direction in
+            let step: Float = 0.5
+            switch direction {
+            case .increment:
+                viewModel.updatePreamp(gain: min(EQBand.gainRange.upperBound, viewModel.preamp + step))
+            case .decrement:
+                viewModel.updatePreamp(gain: max(EQBand.gainRange.lowerBound, viewModel.preamp - step))
+            @unknown default:
+                break
+            }
+        }
     }
 
     private var eqBinding: Binding<Bool> {
@@ -212,6 +230,20 @@ struct EQBandControl: View {
         }
         .frame(width: 40)
         .onTapGesture(count: 2) { onGainChanged(0) }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(band.label) band")
+        .accessibilityValue(String(format: "%+.0f dB", gain))
+        .accessibilityAdjustableAction { direction in
+            let step: Float = 0.5
+            switch direction {
+            case .increment:
+                onGainChanged(min(EQBand.gainRange.upperBound, gain + step))
+            case .decrement:
+                onGainChanged(max(EQBand.gainRange.lowerBound, gain - step))
+            @unknown default:
+                break
+            }
+        }
     }
 }
 

@@ -1,17 +1,23 @@
 import SwiftUI
 
-/// Minimal layout tokens. Chrome stays system Liquid Glass; content is flat (no nested cards).
+/// Layout tokens — readable sizes, stable split columns (no content-driven width jumps).
 enum OpenEQTheme {
-    static let pagePadding: CGFloat = 24
-    static let blockSpacing: CGFloat = 28
-    static let sectionSpacing: CGFloat = 20
-    static let controlSpacing: CGFloat = 12
-    static let playerBarCornerRadius: CGFloat = 18
-    static let minSidebarWidth: CGFloat = 260
-    static let idealSidebarWidth: CGFloat = 300
-    static let maxSidebarWidth: CGFloat = 360
-    static let minWindowWidth: CGFloat = 960
-    static let minWindowHeight: CGFloat = 600
+    static let pagePadding: CGFloat = 16
+    static let blockSpacing: CGFloat = 20
+    static let sectionSpacing: CGFloat = 14
+    static let controlSpacing: CGFloat = 10
+    static let playerBarCornerRadius: CGFloat = 14
+    /// Locked sidebar width — min==max prevents list content from shoving the detail.
+    static let sidebarWidth: CGFloat = 268
+    static let minSidebarWidth: CGFloat = 268
+    static let idealSidebarWidth: CGFloat = 268
+    static let maxSidebarWidth: CGFloat = 268
+    // The full tab workspace is designed around this fixed macOS window size.
+    static let minWindowWidth: CGFloat = 1100
+    static let minWindowHeight: CGFloat = 720
+    static let inspectorMinWidth: CGFloat = 300
+    static let inspectorIdealWidth: CGFloat = 320
+    static let inspectorMaxWidth: CGFloat = 380
 }
 
 struct OpenEQStatusDot: View {

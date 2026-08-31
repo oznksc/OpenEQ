@@ -668,4 +668,209 @@ final class OpenEQTests: XCTestCase {
         XCTAssertTrue(ChannelLayout.stereo.isFullySupported)
         XCTAssertFalse(ChannelLayout.multiChannel.isFullySupported)
     }
+
+    // MARK: - Graph model
+
+    func testGraphStarterTemplateHasRunnableSystemChain() {
+        let doc = GraphDocument.starterTemplate()
+        let chains = GraphValidation.compileChains(doc)
+        XCTAssertFalse(chains.isEmpty)
+        XCTAssertTrue(chains.contains { $0.sourceKind == .system })
+        XCTAssertNotNil(chains.first?.equalizerID)
+        XCTAssertNotNil(chains.first?.outputID)
+    }
+
+    func testGraphRejectsCycles() {
+        var doc = GraphDocument.starterTemplate()
+        let dyn = GraphNode(kind: .dynamics, position: CGPoint(x: 400, y: 300))
+        doc.nodes.append(dyn)
+        guard let eq = doc.nodes.first(where: { $0.kind == .equalizer }) else {
+            return XCTFail("Missing equalizer")
+        }
+        // Remove existing eq→output so eq.out is free, wire eq→dyn
+        doc.edges.removeAll { $0.from.nodeID == eq.id }
+        doc.edges.append(GraphEdge(
+            from: GraphPortID(nodeID: eq.id, name: "out"),
+            to: GraphPortID(nodeID: dyn.id, name: "in")
+        ))
+        // Closing dyn→eq would form a cycle
+        XCTAssertFalse(
+            GraphValidation.canConnect(
+                from: GraphPortID(nodeID: dyn.id, name: "out"),
+                to: GraphPortID(nodeID: eq.id, name: "in"),
+                in: doc
+            )
+        )
+    }
+
+    func testGraphDocumentCodableRoundTrip() throws {
+        let original = GraphDocument.starterTemplate()
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(GraphDocument.self, from: data)
+        XCTAssertEqual(decoded.nodes.count, original.nodes.count)
+        XCTAssertEqual(decoded.edges.count, original.edges.count)
+        XCTAssertEqual(decoded.schemaVersion, GraphDocument.currentSchemaVersion)
+    }
+
+    func testGraphCanConnectValidPorts() {
+        let doc = GraphDocument.starterTemplate()
+        guard let file = doc.nodes.first(where: { $0.kind == .fileSource }),
+              let eq = doc.nodes.first(where: { $0.kind == .equalizer }) else {
+            return XCTFail("Missing nodes")
+        }
+        // EQ already has an input — fan-in not allowed for second connection to same input
+        XCTAssertFalse(
+            GraphValidation.canConnect(
+                from: file.portID(name: "out"),
+                to: eq.portID(name: "in"),
+                in: doc
+            )
+        )
+    }
+
+    func testGraphRuntimePrefersSystemChainFromStarter() {
+        let doc = GraphDocument.starterTemplate()
+        guard let run = GraphRuntime.preferredRun(from: doc) else {
+            return XCTFail("Expected runnable system chain")
+        }
+        XCTAssertEqual(run.chain.sourceKind, .system)
+        if case .process(let target, _, let label) = run.kind {
+            XCTAssertEqual(target, .systemExcludingSelf)
+            XCTAssertEqual(label, "System Audio")
+        } else {
+            XCTFail("Expected process kind")
+        }
+        let preset = GraphRuntime.equalizerPreset(
+            for: run.chain,
+            document: doc,
+            fallback: .flatPreset()
+        )
+        XCTAssertEqual(preset.name, "Flat")
+    }
+
+    func testGraphRuntimeResolvesAppBundleTarget() {
+        var doc = GraphDocument()
+        let appID = UUID()
+        let eqID = UUID()
+        let outID = UUID()
+        doc.nodes = [
+            GraphNode(
+                id: appID,
+                kind: .appSource,
+                title: "Chrome",
+                position: .zero,
+                config: .appSource(
+                    .init(
+                        bundleID: "com.google.Chrome",
+                        processObjectID: nil,
+                        displayName: "Chrome",
+                        pid: nil
+                    )
+                )
+            ),
+            GraphNode(id: eqID, kind: .equalizer, position: CGPoint(x: 200, y: 0)),
+            GraphNode(id: outID, kind: .output, position: CGPoint(x: 400, y: 0))
+        ]
+        doc.edges = [
+            GraphEdge(
+                from: GraphPortID(nodeID: appID, name: "out"),
+                to: GraphPortID(nodeID: eqID, name: "in")
+            ),
+            GraphEdge(
+                from: GraphPortID(nodeID: eqID, name: "out"),
+                to: GraphPortID(nodeID: outID, name: "in")
+            )
+        ]
+        guard let run = GraphRuntime.preferredRun(from: doc) else {
+            return XCTFail("Expected app chain")
+        }
+        XCTAssertEqual(run.chain.sourceKind, .app)
+        if case .process(let target, _, let label) = run.kind {
+            XCTAssertEqual(target, .bundleIDs(["com.google.Chrome"]))
+            XCTAssertEqual(label, "Chrome")
+        } else {
+            XCTFail("Expected process kind for app")
+        }
+    }
+
+    func testGraphRuntimeResolvesInputMonitorChain() {
+        var doc = GraphDocument()
+        let micID = UUID()
+        let eqID = UUID()
+        let outID = UUID()
+        doc.nodes = [
+            GraphNode(
+                id: micID,
+                kind: .inputSource,
+                position: .zero,
+                config: .inputSource(.init(deviceUID: "BuiltInMicUID", deviceName: "MacBook Mic"))
+            ),
+            GraphNode(id: eqID, kind: .equalizer, position: CGPoint(x: 200, y: 0)),
+            GraphNode(
+                id: outID,
+                kind: .output,
+                position: CGPoint(x: 400, y: 0),
+                config: .output(.init(deviceUID: "SpeakerUID", deviceName: "Speakers"))
+            )
+        ]
+        doc.edges = [
+            GraphEdge(from: GraphPortID(nodeID: micID, name: "out"), to: GraphPortID(nodeID: eqID, name: "in")),
+            GraphEdge(from: GraphPortID(nodeID: eqID, name: "out"), to: GraphPortID(nodeID: outID, name: "in"))
+        ]
+        guard let run = GraphRuntime.preferredRun(from: doc) else {
+            return XCTFail("Expected input chain")
+        }
+        XCTAssertEqual(run.chain.sourceKind, .input)
+        if case .input(let inUID, let outUID, let label) = run.kind {
+            XCTAssertEqual(inUID, "BuiltInMicUID")
+            XCTAssertEqual(outUID, "SpeakerUID")
+            XCTAssertEqual(label, "MacBook Mic")
+        } else {
+            XCTFail("Expected input kind")
+        }
+    }
+
+    func testGraphRuntimePrefersProcessOverInput() {
+        var doc = GraphDocument.starterTemplate()
+        let micID = UUID()
+        let eq2 = UUID()
+        let out2 = UUID()
+        doc.nodes.append(contentsOf: [
+            GraphNode(id: micID, kind: .inputSource, position: CGPoint(x: 80, y: 400)),
+            GraphNode(id: eq2, kind: .equalizer, position: CGPoint(x: 320, y: 400)),
+            GraphNode(id: out2, kind: .output, position: CGPoint(x: 580, y: 400))
+        ])
+        doc.edges.append(contentsOf: [
+            GraphEdge(from: GraphPortID(nodeID: micID, name: "out"), to: GraphPortID(nodeID: eq2, name: "in")),
+            GraphEdge(from: GraphPortID(nodeID: eq2, name: "out"), to: GraphPortID(nodeID: out2, name: "in"))
+        ])
+        guard let run = GraphRuntime.preferredRun(from: doc) else {
+            return XCTFail("Expected preferred run")
+        }
+        XCTAssertEqual(run.chain.sourceKind, .system)
+    }
+
+    func testProcessTapTargetDescriptions() {
+        XCTAssertEqual(ProcessTapTarget.systemExcludingSelf.shortDescription, "system")
+        XCTAssertEqual(ProcessTapTarget.bundleIDs(["a.b"]).shortDescription, "a.b")
+        XCTAssertTrue(ProcessTapTarget.processes([1, 2]).shortDescription.contains("2"))
+    }
+
+    @MainActor
+    func testGraphStoreTopologyCallbackOnConnect() {
+        let store = GraphStore(document: .starterTemplate())
+        var fired = 0
+        store.onTopologyChanged = { fired += 1 }
+        guard let file = store.document.nodes.first(where: { $0.kind == .fileSource }),
+              let eq = store.document.nodes.first(where: { $0.kind == .equalizer }) else {
+            return XCTFail("Missing nodes")
+        }
+        // Fan-in blocked — should not fire topology for failed connect
+        let connected = store.connect(from: file.portID(name: "out"), to: eq.portID(name: "in"))
+        XCTAssertFalse(connected)
+        XCTAssertEqual(fired, 0)
+
+        store.disconnect(edgeID: store.document.edges[0].id)
+        XCTAssertEqual(fired, 1)
+    }
 }

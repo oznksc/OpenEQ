@@ -157,6 +157,13 @@ final class OpenEQViewModel {
     var systemEQSetupDetail: String?
     var isReceivingTapAudio = false
     var conflictingHALPlugins: [String] = []
+    var graphStore = GraphStore()
+    var audioProcesses: [AudioProcessInfo] = []
+    var showGraphInspector = true
+    var graphRuntimeLabel: String?
+    /// Set while a graph chain is actively driven by Run Graph.
+    var runningGraphNodeIDsOverride: Set<UUID> = []
+    private var graphRerunTask: Task<Void, Never>?
 
     var playbackDuration: TimeInterval {
         audioEngineController.playbackDuration
@@ -166,15 +173,43 @@ final class OpenEQViewModel {
         audioEngineController.playbackPosition
     }
 
+    /// Nodes that belong to an actively running audio chain (for canvas status rings).
+    var runningGraphNodeIDs: Set<UUID> {
+        if !runningGraphNodeIDsOverride.isEmpty,
+           isSystemEQActive || isExternalLoopbackActive {
+            return runningGraphNodeIDsOverride
+        }
+        var ids = Set<UUID>()
+        let chains = graphStore.runnableChains
+        if isSystemEQActive {
+            for chain in chains where chain.sourceKind == .system || chain.sourceKind == .app {
+                ids.formUnion(chain.nodeIDs)
+            }
+        }
+        if isExternalLoopbackActive {
+            for chain in chains where chain.sourceKind == .input {
+                ids.formUnion(chain.nodeIDs)
+            }
+        }
+        if case .playing = playbackState {
+            for chain in chains where chain.sourceKind == .file {
+                ids.formUnion(chain.nodeIDs)
+            }
+        }
+        return ids
+    }
+
     let audioEngineController: AudioEngineController
     let systemAudioManager: SystemAudioManager
     private let presetStore = PresetStore()
     let deviceProfileStore = DeviceProfileStore()
     private let auPluginHost = AUv3PluginHost()
     private let autoEQCatalog = AutoEQCatalog()
+    let processEnumerator = AudioProcessEnumerator()
     private var graphicBands: [EQBand]
     private var parametricBands: [EQBand]
     var isApplyingDeviceProfile = false
+    var isApplyingGraphEQ = false
 
     convenience init(audioEngineController: AudioEngineController) {
         self.init(
@@ -238,9 +273,65 @@ final class OpenEQViewModel {
 
     /// Called once from the app root after the UI is ready.
     func handleAppLaunch() {
+        processEnumerator.start()
+        audioProcesses = processEnumerator.processes
+        graphStore.onTopologyChanged = { [weak self] in
+            self?.scheduleGraphRerunIfNeeded()
+        }
+        syncPrimaryEqualizerNodeFromLegacyState()
         if preferSystemEQOnLaunch {
             enableSystemEQOneClick()
         }
+    }
+
+    func refreshAudioProcesses() {
+        processEnumerator.refresh()
+        audioProcesses = processEnumerator.processes
+    }
+
+    /// Debounced rebuild when the user rewires a live graph.
+    func scheduleGraphRerunIfNeeded() {
+        guard isSystemEQActive || isExternalLoopbackActive else { return }
+        graphRerunTask?.cancel()
+        graphRerunTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 450_000_000)
+            guard !Task.isCancelled else { return }
+            guard self.isSystemEQActive || self.isExternalLoopbackActive else { return }
+            self.runGraph()
+        }
+    }
+
+    /// Pushes inspector / graph EQ edits into the live engines via existing preset path.
+    func applyGraphEqualizer(_ eq: GraphNodeConfig.EqualizerConfig) {
+        guard !isApplyingGraphEQ else { return }
+        isApplyingGraphEQ = true
+        defer { isApplyingGraphEQ = false }
+
+        eqMode = eq.mode
+        bands = eq.bands
+        preamp = eq.preamp
+        cacheActiveBands()
+        selectedPreset = EQPreset(name: eq.presetName, mode: eq.mode, bands: eq.bands, preamp: eq.preamp)
+        audioEngineController.applyPreset(selectedPreset)
+        setEnabled(eq.isEnabled)
+        updateExternalLoopbackEQIfNeeded()
+        updateSystemEQIfNeeded()
+    }
+
+    private func syncPrimaryEqualizerNodeFromLegacyState() {
+        guard let eqID = graphStore.document.nodes.first(where: { $0.kind == .equalizer })?.id else { return }
+        graphStore.updateEqualizer(nodeID: eqID) { config in
+            config.mode = eqMode
+            config.bands = bands
+            config.preamp = preamp
+            config.isEnabled = isEnabled
+            config.presetName = selectedPreset.name
+        }
+    }
+
+    private func pushPresetIntoGraph(_ preset: EQPreset) {
+        guard !isApplyingGraphEQ else { return }
+        graphStore.applyPreset(preset)
     }
 
     // MARK: - Playback Controls
@@ -680,6 +771,7 @@ final class OpenEQViewModel {
         rememberRecentPreset(preset)
         updateExternalLoopbackEQIfNeeded()
         updateSystemEQIfNeeded()
+        pushPresetIntoGraph(preset)
     }
 
     func selectPreset(_ preset: EQPreset) {
@@ -736,7 +828,7 @@ final class OpenEQViewModel {
         presetStore.saveUserPresets(userPresets)
     }
 
-    private func cacheActiveBands() {
+    func cacheActiveBands() {
         switch eqMode {
         case .graphic:
             graphicBands = bands
