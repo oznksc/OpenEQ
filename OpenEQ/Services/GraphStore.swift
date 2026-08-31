@@ -145,6 +145,26 @@ final class GraphStore {
         markDirty(topologyChanged: true)
     }
 
+    func removeNode(_ id: UUID) {
+        document.nodes.removeAll { $0.id == id }
+        document.edges.removeAll { $0.from.nodeID == id || $0.to.nodeID == id }
+        selectedNodeIDs.remove(id)
+        markDirty(topologyChanged: true)
+    }
+
+    func disconnectAll(nodeID: UUID) {
+        document.edges.removeAll { $0.from.nodeID == nodeID || $0.to.nodeID == nodeID }
+        markDirty(topologyChanged: true)
+    }
+
+    @discardableResult
+    func duplicateNode(_ id: UUID) -> UUID? {
+        guard let node = document.node(id: id) else { return nil }
+        let newPos = CGPoint(x: node.cgPosition.x + 30, y: node.cgPosition.y + 30)
+        let newID = addNode(kind: node.kind, at: newPos, title: node.title, config: node.config)
+        return newID
+    }
+
     func deleteSelection() {
         if !selectedEdgeIDs.isEmpty {
             document.edges.removeAll { selectedEdgeIDs.contains($0.id) }

@@ -3,16 +3,25 @@ import SwiftUI
 struct NodeInspectorView: View {
     @Bindable var store: GraphStore
     @Bindable var viewModel: OpenEQViewModel
+    var targetNodeID: UUID? = nil
+    var onClose: (() -> Void)? = nil
+
+    private var activeNode: GraphNode? {
+        if let targetNodeID {
+            return store.document.node(id: targetNodeID)
+        }
+        return store.selectedNode
+    }
 
     var body: some View {
         Group {
-            if let node = store.selectedNode {
+            if let node = activeNode {
                 ScrollView {
                     VStack(alignment: .leading, spacing: OpenEQTheme.sectionSpacing) {
                         header(node)
                         content(for: node)
                     }
-                    .padding(OpenEQTheme.pagePadding)
+                    .padding(16)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
             } else {
@@ -29,17 +38,31 @@ struct NodeInspectorView: View {
     private func header(_ node: GraphNode) -> some View {
         HStack(spacing: 10) {
             Image(systemName: node.kind.systemImage)
-                .font(.title3.weight(.semibold))
+                .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(GraphTheme.accent(for: node.kind))
-                .frame(width: 28, height: 28)
+                .frame(width: 26, height: 26)
+                .background(GraphTheme.accent(for: node.kind).opacity(0.15), in: RoundedRectangle(cornerRadius: 6))
+
             VStack(alignment: .leading, spacing: 2) {
                 Text(node.title)
-                    .font(.headline)
+                    .font(.system(size: 13, weight: .bold))
                 Text(node.kind.title)
-                    .font(.caption)
+                    .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.secondary)
             }
+
             Spacer(minLength: 0)
+
+            if let onClose {
+                Button {
+                    onClose()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 14))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
         }
     }
 

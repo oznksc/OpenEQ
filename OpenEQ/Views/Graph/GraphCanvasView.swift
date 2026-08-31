@@ -2,6 +2,7 @@ import SwiftUI
 
 struct GraphCanvasView: View {
     @Bindable var store: GraphStore
+    @Bindable var viewModel: OpenEQViewModel
     var runningNodeIDs: Set<UUID> = []
 
     /// Live drag — document is only written on mouse-up so the graph stays 60fps.
@@ -10,6 +11,7 @@ struct GraphCanvasView: View {
     @State private var panSession: PanSession?
     @State private var isCanvasFocused = false
     @State private var magnifyBase: CGFloat = 1
+    @State private var inspectedNodeID: UUID? = nil
 
     private struct NodeDragSession: Equatable {
         let id: UUID
@@ -45,6 +47,7 @@ struct GraphCanvasView: View {
                         .gesture(backgroundPanGesture)
                         .onTapGesture {
                             store.clearSelection()
+                            inspectedNodeID = nil
                             isCanvasFocused = true
                         }
 
@@ -67,7 +70,7 @@ struct GraphCanvasView: View {
                         ContentUnavailableView {
                             Label("Empty Graph", systemImage: "point.3.connected.trianglepath.dotted")
                         } description: {
-                            Text("Add sources from the sidebar.")
+                            Text("Add sources from the bottom Nodes menu.")
                         } actions: {
                             Button("Starter") { store.resetToStarter() }
                                 .buttonStyle(.borderedProminent)
@@ -106,6 +109,7 @@ struct GraphCanvasView: View {
             .onKeyPress(.escape) {
                 cancelLiveDrag()
                 store.clearSelection()
+                inspectedNodeID = nil
                 return .handled
             }
             .onKeyPress(characters: CharacterSet(charactersIn: "+=")) { _ in
@@ -144,10 +148,72 @@ struct GraphCanvasView: View {
         GraphNodeView(
             node: node,
             isSelected: store.selectedNodeIDs.contains(node.id) || isDragging,
-            isRunning: runningNodeIDs.contains(node.id)
+            isRunning: runningNodeIDs.contains(node.id),
+            onInspect: { inspectedNodeID = node.id }
         )
         .equatable()
         .position(x: origin.x + size.width / 2, y: origin.y + size.height / 2)
+        .contextMenu {
+            Button {
+                inspectedNodeID = node.id
+            } label: {
+                Label("Inspect Details...", systemImage: "slider.horizontal.3")
+            }
+
+            if case .equalizer(let eq) = node.config {
+                Button {
+                    store.updateEqualizer(nodeID: node.id) { $0.isEnabled.toggle() }
+                } label: {
+                    Label(eq.isEnabled ? "Bypass EQ" : "Enable EQ", systemImage: eq.isEnabled ? "power" : "power.circle")
+                }
+            } else if case .dynamics(let dyn) = node.config {
+                Button {
+                    var updated = dyn
+                    updated.settings.isCompressorEnabled.toggle()
+                    store.updateConfig(nodeID: node.id, config: .dynamics(updated))
+                } label: {
+                    Label(dyn.settings.isCompressorEnabled ? "Bypass Compressor" : "Enable Compressor", systemImage: "waveform.path.ecg")
+                }
+            }
+
+            Button {
+                store.disconnectAll(nodeID: node.id)
+            } label: {
+                Label("Disconnect Cables", systemImage: "cable.connector.slash")
+            }
+
+            Button {
+                if let newID = store.duplicateNode(node.id) {
+                    store.selectNode(newID)
+                }
+            } label: {
+                Label("Duplicate Node", systemImage: "plus.square.on.square")
+            }
+
+            Divider()
+
+            Button(role: .destructive) {
+                store.removeNode(node.id)
+            } label: {
+                Label("Delete Node", systemImage: "trash")
+            }
+        }
+        .popover(
+            isPresented: Binding(
+                get: { inspectedNodeID == node.id },
+                set: { if !$0 { inspectedNodeID = nil } }
+            ),
+            arrowEdge: .top
+        ) {
+            NodeInspectorView(
+                store: store,
+                viewModel: viewModel,
+                targetNodeID: node.id,
+                onClose: { inspectedNodeID = nil }
+            )
+            .frame(width: 330, height: 440)
+            .background(OpenEQTheme.chassisBg)
+        }
         // Trailing port: wire (takes priority over body move).
         .overlay(alignment: .trailing) {
             if !node.kind.outputPortNames.isEmpty {

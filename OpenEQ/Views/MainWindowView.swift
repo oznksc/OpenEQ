@@ -179,41 +179,6 @@ struct MainWindowView: View {
 
     private var routingPage: some View {
         GraphWorkspaceView(viewModel: viewModel, store: graphStore)
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                routingHintBar
-            }
-            .inspector(isPresented: $viewModel.showGraphInspector) {
-                NodeInspectorView(store: graphStore, viewModel: viewModel)
-                    .inspectorColumnWidth(min: 300, ideal: 320, max: 380)
-            }
-            .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        viewModel.showGraphInspector.toggle()
-                    } label: {
-                        Image(systemName: "sidebar.trailing")
-                    }
-                    .help("Inspector")
-                }
-            }
-    }
-
-    private var routingHintBar: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "info.circle")
-                .foregroundStyle(OpenEQTheme.accentCyan)
-            Text("Drag nodes to move · drag from an output port to connect")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Spacer()
-            Text("⌘ Delete to remove")
-                .font(.caption.monospaced())
-                .foregroundStyle(.tertiary)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 7)
-        .background(.bar)
-        .overlay(alignment: .top) { Divider() }
     }
 
     private var libraryPage: some View {

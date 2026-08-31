@@ -5,6 +5,7 @@ struct GraphNodeView: View, Equatable {
     let node: GraphNode
     let isSelected: Bool
     let isRunning: Bool
+    var onInspect: (() -> Void)? = nil
 
     private var accent: Color { GraphTheme.accent(for: node.kind) }
 
@@ -44,6 +45,23 @@ struct GraphNodeView: View, Equatable {
                             .fill(Color.green)
                             .frame(width: 7, height: 7)
                             .accessibilityLabel("Running")
+                    }
+
+                    if let onInspect {
+                        Button {
+                            onInspect()
+                        } label: {
+                            Image(systemName: "slider.horizontal.3")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundStyle(isSelected ? accent : Color.secondary.opacity(0.7))
+                                .frame(width: 20, height: 20)
+                                .background(
+                                    Color.white.opacity(isSelected ? 0.12 : 0.05),
+                                    in: Circle()
+                                )
+                        }
+                        .buttonStyle(.plain)
+                        .help("Inspect node settings")
                     }
                 }
 
