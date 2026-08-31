@@ -2,7 +2,6 @@ import SwiftUI
 
 struct SystemAudioView: View {
     let viewModel: OpenEQViewModel
-    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         NavigationStack {
@@ -62,7 +61,6 @@ struct SystemAudioView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Done") {
                         viewModel.isShowingSystemAudio = false
-                        dismiss()
                     }
                     .keyboardShortcut(.escape)
                 }
@@ -115,11 +113,13 @@ struct SystemAudioView: View {
     // MARK: - One click
 
     private var oneClickContent: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 14) {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
+                    Text("Driverless Core Audio Process Tap")
+                        .font(.system(size: 13, weight: .bold))
                     Text(statusSubtitle)
-                        .font(.subheadline)
+                        .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -131,12 +131,13 @@ struct SystemAudioView: View {
             } label: {
                 Label(
                     viewModel.isSystemEQActive ? "Stop System EQ" : "Start System EQ",
-                    systemImage: viewModel.isSystemEQActive ? "stop.fill" : "play.fill"
+                    systemImage: viewModel.isSystemEQActive ? "stop.fill" : "bolt.fill"
                 )
+                .font(.system(size: 13, weight: .bold))
                 .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
-            .tint(viewModel.isSystemEQActive ? .red : .accentColor)
+            .tint(viewModel.isSystemEQActive ? OpenEQTheme.accentRed : OpenEQTheme.accentCyan)
             .controlSize(.large)
 
             if viewModel.systemAudioStatus == .permissionRequired {
@@ -154,12 +155,17 @@ struct SystemAudioView: View {
             LabeledContent("Latency", value: latencyText)
 
             if viewModel.isSystemEQActive {
-                Label(
-                    viewModel.isReceivingTapAudio ? "Tap signal: yes" : "Tap signal: waiting…",
-                    systemImage: viewModel.isReceivingTapAudio ? "waveform" : "waveform.slash"
-                )
-                .font(.caption)
-                .foregroundStyle(viewModel.isReceivingTapAudio ? .green : .orange)
+                HStack(spacing: 6) {
+                    StudioLED(
+                        isOn: viewModel.isReceivingTapAudio,
+                        activeColor: OpenEQTheme.accentGreen,
+                        inactiveColor: OpenEQTheme.accentAmber,
+                        size: 7
+                    )
+                    Text(viewModel.isReceivingTapAudio ? "Core Audio Tap Signal: Active" : "Core Audio Tap Signal: Waiting for audio…")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(viewModel.isReceivingTapAudio ? OpenEQTheme.accentGreen : OpenEQTheme.accentAmber)
+                }
             }
 
             if let detail = viewModel.systemEQSetupDetail {
@@ -170,7 +176,7 @@ struct SystemAudioView: View {
             }
 
             if let device = viewModel.activePhysicalOutputName {
-                LabeledContent("Output", value: device)
+                LabeledContent("Physical Output", value: device)
             }
 
             Toggle(isOn: Binding(

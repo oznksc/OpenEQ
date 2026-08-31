@@ -15,7 +15,6 @@ struct GraphPortView: View {
                 Circle()
                     .strokeBorder(Color.primary.opacity(0.2), lineWidth: 1)
             )
-            .shadow(color: accent.opacity(isHighlighted ? 0.6 : 0), radius: 4)
             .gesture(
                 DragGesture(minimumDistance: 2)
                     .onChanged(onDragChanged)

@@ -72,11 +72,12 @@ struct CompactLevelMeter: View {
         let t = CGFloat(min(1, max(0, level)))
         return GeometryReader { geo in
             ZStack(alignment: .leading) {
-                Capsule().fill(Color.primary.opacity(0.1))
+                Capsule().fill(OpenEQTheme.recessedSlotBg.opacity(0.8))
                 Capsule()
-                    .fill(t > 0.9 ? Color.red : (t > 0.7 ? Color.orange : Color.green))
+                    .fill(t > 0.9 ? OpenEQTheme.accentRed : (t > 0.7 ? OpenEQTheme.accentGold : OpenEQTheme.accentGreen))
                     .frame(width: max(2, geo.size.width * t))
             }
         }
     }
 }
+

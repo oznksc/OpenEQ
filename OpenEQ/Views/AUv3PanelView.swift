@@ -4,17 +4,17 @@ struct AUv3PanelView: View {
     @Bindable var viewModel: OpenEQViewModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             if viewModel.availableAUPlugins.isEmpty {
-                Text("No effect units found")
-                    .font(.caption)
+                Text("No Audio Unit effect plugins detected")
+                    .font(.system(size: 11))
                     .foregroundStyle(.tertiary)
             } else {
                 Picker("Plugin", selection: Binding(
                     get: { viewModel.selectedAUPluginID },
                     set: { viewModel.selectedAUPluginID = $0 }
                 )) {
-                    Text("None").tag(String?.none)
+                    Text("None Selected").tag(String?.none)
                     ForEach(viewModel.availableAUPlugins) { plugin in
                         Text(plugin.displayName).tag(Optional(plugin.id))
                     }
@@ -22,47 +22,58 @@ struct AUv3PanelView: View {
                 .labelsHidden()
             }
 
-            HStack(spacing: 16) {
-                Button("Load") { viewModel.loadSelectedAUPlugin() }
-                    .buttonStyle(.borderless)
-                    .disabled(viewModel.selectedAUPluginID == nil || viewModel.isLoadingAUPlugin)
+            HStack(spacing: 12) {
+                Button("Load Unit") {
+                    viewModel.loadSelectedAUPlugin()
+                }
+                .buttonStyle(TactileButtonStyle())
+                .disabled(viewModel.selectedAUPluginID == nil || viewModel.isLoadingAUPlugin)
 
-                Button("Unload") { viewModel.unloadAUPlugin() }
-                    .buttonStyle(.borderless)
-                    .disabled(viewModel.loadedAUPluginName == nil)
+                Button("Unload") {
+                    viewModel.unloadAUPlugin()
+                }
+                .buttonStyle(TactileButtonStyle())
+                .disabled(viewModel.loadedAUPluginName == nil)
 
                 Button {
                     viewModel.refreshAUPlugins()
                 } label: {
                     Image(systemName: "arrow.clockwise")
                 }
-                .buttonStyle(.borderless)
-                .help("Rescan")
+                .buttonStyle(TactileButtonStyle())
+                .help("Rescan AUv3 plugins")
             }
-            .font(.caption)
-            .foregroundStyle(.secondary)
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(OpenEQTheme.accentCyan)
 
             if viewModel.isLoadingAUPlugin {
-                ProgressView()
-                    .controlSize(.small)
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("Loading Audio Unit…")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             if let loaded = viewModel.loadedAUPluginName {
-                Text(loaded)
-                    .font(.caption)
-                    .foregroundStyle(.green)
-                    .lineLimit(2)
+                HStack(spacing: 6) {
+                    StudioLED(isOn: true, activeColor: OpenEQTheme.accentGreen, size: 6)
+                    Text("Active: \(loaded)")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(OpenEQTheme.accentGreen)
+                        .lineLimit(2)
+                }
             }
 
             if let error = viewModel.auPluginError {
                 Text(error)
                     .font(.caption2)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(OpenEQTheme.accentRed)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            Text("Local playback only")
-                .font(.caption2)
+            Text("Local playback graph insert only")
+                .font(.system(size: 10, weight: .regular))
                 .foregroundStyle(.tertiary)
         }
         .onAppear {
@@ -72,3 +83,4 @@ struct AUv3PanelView: View {
         }
     }
 }
+

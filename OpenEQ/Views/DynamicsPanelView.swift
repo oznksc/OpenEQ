@@ -4,10 +4,11 @@ struct DynamicsPanelView: View {
     @Bindable var viewModel: OpenEQViewModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("Compressor")
-                    .font(.subheadline)
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 8) {
+                StudioLED(isOn: viewModel.dynamics.isCompressorEnabled, activeColor: OpenEQTheme.accentCyan, size: 7)
+                Text("Studio Dynamics Processor")
+                    .font(.system(size: 12, weight: .bold))
                     .foregroundStyle(.secondary)
                 Spacer()
                 Toggle("Compressor", isOn: Binding(
@@ -19,15 +20,15 @@ struct DynamicsPanelView: View {
                 .controlSize(.small)
             }
 
-            Group {
-                row("Thresh", String(format: "%.0f dB", viewModel.dynamics.threshold),
+            VStack(spacing: 10) {
+                row("Threshold", String(format: "%.0f dB", viewModel.dynamics.threshold),
                     Binding(
                         get: { Double(viewModel.dynamics.threshold) },
                         set: { viewModel.setCompressorThreshold(Float($0)) }
                     ),
                     Double(DynamicsSettings.thresholdRange.lowerBound)...Double(DynamicsSettings.thresholdRange.upperBound)
                 )
-                row("Ratio", String(format: "%.1f:1", viewModel.dynamics.ratio),
+                row("Ratio", String(format: "%.1f : 1", viewModel.dynamics.ratio),
                     Binding(
                         get: { Double(viewModel.dynamics.ratio) },
                         set: { viewModel.setCompressorRatio(Float($0)) }
@@ -48,23 +49,28 @@ struct DynamicsPanelView: View {
                     ),
                     Double(DynamicsSettings.releaseRange.lowerBound)...Double(DynamicsSettings.releaseRange.upperBound)
                 )
-                row("Makeup", String(format: "%+.1f dB", viewModel.dynamics.makeupGain),
+                row("Makeup Gain", String(format: "%+.1f dB", viewModel.dynamics.makeupGain),
                     Binding(
                         get: { Double(viewModel.dynamics.makeupGain) },
                         set: { viewModel.setCompressorMakeup(Float($0)) }
                     ),
-                    Double(DynamicsSettings.makeupRange.lowerBound)...Double(DynamicsSettings.makeupRange.upperBound)
+                    Double(DynamicsSettings.makeupRange.lowerBound)...Double(DynamicsSettings.makeupRange.upperBound),
+                    color: viewModel.dynamics.makeupGain > 0 ? OpenEQTheme.accentCyan : (viewModel.dynamics.makeupGain < 0 ? OpenEQTheme.accentAmber : .secondary)
                 )
             }
             .disabled(!viewModel.dynamics.isCompressorEnabled)
             .opacity(viewModel.dynamics.isCompressorEnabled ? 1 : 0.4)
+            .animation(.easeInOut(duration: 0.15), value: viewModel.dynamics.isCompressorEnabled)
 
-            row("Balance", balanceLabel,
+            Divider().opacity(0.15)
+
+            row("Stereo Balance", balanceLabel,
                 Binding(
                     get: { Double(viewModel.dynamics.balance) },
                     set: { viewModel.setStereoBalance(Float($0)) }
                 ),
-                Double(DynamicsSettings.balanceRange.lowerBound)...Double(DynamicsSettings.balanceRange.upperBound)
+                Double(DynamicsSettings.balanceRange.lowerBound)...Double(DynamicsSettings.balanceRange.upperBound),
+                color: abs(viewModel.dynamics.balance) > 0.05 ? OpenEQTheme.accentCyan : .secondary
             )
         }
     }
@@ -79,20 +85,22 @@ struct DynamicsPanelView: View {
         _ title: String,
         _ value: String,
         _ binding: Binding<Double>,
-        _ range: ClosedRange<Double>
+        _ range: ClosedRange<Double>,
+        color: Color = .secondary
     ) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Text(title)
-                    .font(.caption)
+                    .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(.secondary)
                 Spacer()
                 Text(value)
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.tertiary)
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .foregroundStyle(color)
             }
             Slider(value: binding, in: range)
                 .controlSize(.small)
         }
     }
 }
+

@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Frequency-response curve with interactive nodes (drag gain/freq, scroll Q).
+/// Frequency-response curve with tactile studio oscilloscope rendering, glow layers, and interactive nodes.
 struct EQCurveView: View {
     let bands: [EQBand]
     let mode: EQMode
@@ -17,27 +17,55 @@ struct EQCurveView: View {
 
     @State private var draggingBandID: EQBand.ID?
     @State private var hoveredBandID: EQBand.ID?
+    @State private var cursorLocation: CGPoint? = nil
 
     var body: some View {
         GeometryReader { geometry in
             let plotRect = CGRect(
-                x: 42,
-                y: 12,
-                width: max(1, geometry.size.width - 58),
-                height: max(1, geometry.size.height - 38)
+                x: 44,
+                y: 14,
+                width: max(1, geometry.size.width - 60),
+                height: max(1, geometry.size.height - 40)
             )
 
-            ZStack {
+            ZStack(alignment: .topTrailing) {
                 Canvas { context, size in
                     let rect = CGRect(
-                        x: 42,
-                        y: 12,
-                        width: max(1, size.width - 58),
-                        height: max(1, size.height - 38)
+                        x: 44,
+                        y: 14,
+                        width: max(1, size.width - 60),
+                        height: max(1, size.height - 40)
                     )
-                    drawGrid(in: rect, context: &context)
-                    drawCurve(in: rect, context: &context)
-                    drawBandPoints(in: rect, context: &context)
+                    drawOscilloscopeGrid(in: rect, context: &context)
+                    if mode == .parametric, let activeID = hoveredBandID ?? draggingBandID ?? selectedBandID,
+                       let band = bands.first(where: { $0.id == activeID }) {
+                        drawQEnvelope(for: band, in: rect, context: &context)
+                    }
+                    drawCurveGlow(in: rect, context: &context)
+                    drawBandNodes(in: rect, context: &context)
+                }
+
+                // Coordinate HUD Overlay
+                if let cursor = cursorLocation, plotRect.contains(cursor) {
+                    let freq = frequency(atX: cursor.x, in: plotRect)
+                    let g = gain(atY: cursor.y, in: plotRect)
+                    HStack(spacing: 8) {
+                        Text(formatFrequency(freq))
+                            .font(.system(size: 10, weight: .bold, design: .monospaced))
+                            .foregroundStyle(OpenEQTheme.accentCyan)
+                        Text("•")
+                            .font(.system(size: 8))
+                            .foregroundStyle(.secondary)
+                        Text(String(format: "%+.1f dB", g))
+                            .font(.system(size: 10, weight: .bold, design: .monospaced))
+                            .foregroundStyle(g > 0.1 ? OpenEQTheme.accentCyan : (g < -0.1 ? OpenEQTheme.accentAmber : .secondary))
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.black.opacity(0.75), in: Capsule())
+                    .overlay(Capsule().stroke(Color.white.opacity(0.12), lineWidth: 1))
+                    .padding(8)
+                    .transition(.opacity)
                 }
 
                 if isInteractive {
@@ -45,13 +73,10 @@ struct EQCurveView: View {
                 }
             }
         }
-        .frame(height: 170)
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(Color(red: 0.075, green: 0.082, blue: 0.095))
-        )
+        .frame(height: 172)
+        .background(OpenEQTheme.recessedSlotBg, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 8)
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .stroke(Color.white.opacity(0.08), lineWidth: 1)
         )
         .help(isInteractive
@@ -66,17 +91,21 @@ struct EQCurveView: View {
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { value in
+                        cursorLocation = value.location
                         handleDrag(at: value.location, in: plotRect, ended: false)
                     }
                     .onEnded { value in
+                        cursorLocation = nil
                         handleDrag(at: value.location, in: plotRect, ended: true)
                     }
             )
             .onContinuousHover { phase in
                 switch phase {
                 case .active(let location):
-                    hoveredBandID = nearestBand(at: location, in: plotRect, maxDistance: 18)?.id
+                    cursorLocation = location
+                    hoveredBandID = nearestBand(at: location, in: plotRect, maxDistance: 20)?.id
                 case .ended:
+                    cursorLocation = nil
                     hoveredBandID = nil
                 }
             }
@@ -89,13 +118,12 @@ struct EQCurveView: View {
         guard isInteractive else { return }
 
         if draggingBandID == nil {
-            guard let nearest = nearestBand(at: point, in: rect, maxDistance: 22),
-                  let index = bands.firstIndex(where: { $0.id == nearest.id }) else {
+            guard let nearest = nearestBand(at: point, in: rect, maxDistance: 24),
+                  let _ = bands.firstIndex(where: { $0.id == nearest.id }) else {
                 return
             }
             draggingBandID = nearest.id
             onSelectBand?(nearest.id)
-            _ = index
         }
 
         guard let dragID = draggingBandID,
@@ -105,12 +133,10 @@ struct EQCurveView: View {
         }
 
         var band = bands[index]
-        // Graphic mode: lock frequency to ISO centers; only gain is draggable.
         if mode == .parametric {
             band.frequency = frequency(atX: point.x, in: rect)
         }
         band.gain = gain(atY: point.y, in: rect)
-        // Snap near zero for easier flat reset.
         if abs(band.gain) < 0.35 { band.gain = 0 }
         onBandChanged?(index, band)
 
@@ -127,7 +153,6 @@ struct EQCurveView: View {
             return
         }
         var band = bands[index]
-        // Trackpad scroll: positive deltaY typically means scroll up → increase Q.
         let step = Float(delta) * 0.05
         band.q = band.q + step
         onBandChanged?(index, band)
@@ -156,11 +181,12 @@ struct EQCurveView: View {
         )
     }
 
-    // MARK: - Drawing
+    // MARK: - Canvas Rendering
 
-    private func drawGrid(in rect: CGRect, context: inout GraphicsContext) {
-        let gridColor = Color.white.opacity(0.08)
-        let textColor = Color.white.opacity(0.48)
+    private func drawOscilloscopeGrid(in rect: CGRect, context: inout GraphicsContext) {
+        let gridColor = Color.white.opacity(0.06)
+        let textColor = Color.white.opacity(0.42)
+        let zeroLineColor = OpenEQTheme.accentCyan.opacity(0.25)
 
         for gain in gainLabels {
             let y = yPosition(for: gain, in: rect)
@@ -168,14 +194,17 @@ struct EQCurveView: View {
             path.move(to: CGPoint(x: rect.minX, y: y))
             path.addLine(to: CGPoint(x: rect.maxX, y: y))
 
-            let opacity = gain == 0 ? 0.22 : 0.08
-            context.stroke(path, with: .color(Color.white.opacity(opacity)), lineWidth: gain == 0 ? 1.2 : 1)
+            if gain == 0 {
+                context.stroke(path, with: .color(zeroLineColor), lineWidth: 1.2)
+            } else {
+                context.stroke(path, with: .color(gridColor), lineWidth: 0.8)
+            }
 
             let label = gain > 0 ? "+\(Int(gain))" : "\(Int(gain))"
             context.draw(
                 Text(label)
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(textColor),
+                    .font(.system(size: 9, weight: gain == 0 ? .semibold : .regular, design: .monospaced))
+                    .foregroundStyle(gain == 0 ? OpenEQTheme.accentCyan.opacity(0.8) : textColor),
                 at: CGPoint(x: rect.minX - 22, y: y),
                 anchor: .center
             )
@@ -186,11 +215,11 @@ struct EQCurveView: View {
             var path = Path()
             path.move(to: CGPoint(x: x, y: rect.minY))
             path.addLine(to: CGPoint(x: x, y: rect.maxY))
-            context.stroke(path, with: .color(gridColor), lineWidth: 1)
+            context.stroke(path, with: .color(gridColor), lineWidth: 0.8)
 
             context.draw(
                 Text(marker.label)
-                    .font(.caption2.monospacedDigit())
+                    .font(.system(size: 9, weight: .regular, design: .monospaced))
                     .foregroundStyle(textColor),
                 at: CGPoint(x: x, y: rect.maxY + 14),
                 anchor: .center
@@ -198,7 +227,50 @@ struct EQCurveView: View {
         }
     }
 
-    private func drawCurve(in rect: CGRect, context: inout GraphicsContext) {
+    private func drawQEnvelope(for band: EQBand, in rect: CGRect, context: inout GraphicsContext) {
+        let sampleCount = 100
+        var path = Path()
+        let centerIndex = bands.firstIndex(where: { $0.id == band.id }) ?? 0
+        let color = OpenEQTheme.bandColor(at: centerIndex)
+
+        for i in 0..<sampleCount {
+            let progress = Float(i) / Float(sampleCount - 1)
+            let freq = frequencyAt(progress: progress)
+            let contribution = effectiveGain(for: band)
+            let singleGain = preamp + parametricInfluence(for: band, frequency: freq, contribution: contribution)
+            let point = CGPoint(x: xPosition(for: freq, in: rect), y: yPosition(for: singleGain, in: rect))
+            if i == 0 { path.move(to: point) } else { path.addLine(to: point) }
+        }
+
+        context.stroke(path, with: .color(color.opacity(0.35)), style: StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
+    }
+
+    private func drawUnderCurveFill(in rect: CGRect, context: inout GraphicsContext) {
+        let sampleCount = 160
+        var fillPath = Path()
+        let zeroY = yPosition(for: 0, in: rect)
+
+        fillPath.move(to: CGPoint(x: rect.minX, y: zeroY))
+
+        for index in 0..<sampleCount {
+            let progress = Float(index) / Float(sampleCount - 1)
+            let frequency = frequencyAt(progress: progress)
+            let gain = curveGain(at: frequency)
+            let point = CGPoint(x: xPosition(for: frequency, in: rect), y: yPosition(for: gain, in: rect))
+            fillPath.addLine(to: point)
+        }
+
+        fillPath.addLine(to: CGPoint(x: rect.maxX, y: zeroY))
+        fillPath.closeSubpath()
+
+        let gradient = Gradient(colors: [
+            OpenEQTheme.accentCyan.opacity(0.08),
+            Color.clear
+        ])
+        context.fill(fillPath, with: .linearGradient(gradient, startPoint: CGPoint(x: 0, y: rect.minY), endPoint: CGPoint(x: 0, y: rect.maxY)))
+    }
+
+    private func drawCurveGlow(in rect: CGRect, context: inout GraphicsContext) {
         let sampleCount = 180
         var path = Path()
 
@@ -218,33 +290,39 @@ struct EQCurveView: View {
             }
         }
 
-        context.stroke(path, with: .color(Color.cyan.opacity(0.22)), lineWidth: 5)
-        context.stroke(path, with: .color(Color.cyan.opacity(0.92)), lineWidth: 2)
+        // Clean crisp curve
+        context.stroke(path, with: .color(OpenEQTheme.accentCyan.opacity(0.9)), lineWidth: 1.8)
     }
 
-    private func drawBandPoints(in rect: CGRect, context: inout GraphicsContext) {
-        for band in bands {
+    private func drawBandNodes(in rect: CGRect, context: inout GraphicsContext) {
+        for (index, band) in bands.enumerated() {
             let center = pointFor(band: band, in: rect)
-            let isSelected = band.id == selectedBandID || band.id == draggingBandID || band.id == hoveredBandID
-            let radius: CGFloat = isSelected ? 7 : 4
-            let dotRect = CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2)
-            let color: Color = {
-                if !band.isEnabled { return Color.white.opacity(0.28) }
-                if isSelected { return Color.white }
-                return Color.cyan.opacity(0.9)
-            }()
-            context.fill(Path(ellipseIn: dotRect), with: .color(color))
-            if isSelected {
-                context.stroke(
-                    Path(ellipseIn: dotRect.insetBy(dx: -2, dy: -2)),
-                    with: .color(Color.cyan.opacity(0.8)),
-                    lineWidth: 1.5
-                )
+            let isSelected = band.id == selectedBandID || band.id == draggingBandID
+            let isHovered = band.id == hoveredBandID
+            let bandColor = mode == .parametric ? OpenEQTheme.bandColor(at: index) : OpenEQTheme.accentCyan
+
+            if !band.isEnabled {
+                let dotRect = CGRect(x: center.x - 3, y: center.y - 3, width: 6, height: 6)
+                context.fill(Path(ellipseIn: dotRect), with: .color(Color.white.opacity(0.2)))
+                continue
             }
+
+            // Crisp selection/hover ring
+            if isSelected || isHovered {
+                let ringRadius: CGFloat = isSelected ? 8 : 6.5
+                let ringRect = CGRect(x: center.x - ringRadius, y: center.y - ringRadius, width: ringRadius * 2, height: ringRadius * 2)
+                context.stroke(Path(ellipseIn: ringRect), with: .color(bandColor.opacity(0.8)), lineWidth: 1.2)
+            }
+
+            // Main node dot
+            let coreRadius: CGFloat = isSelected ? 4.5 : 3.5
+            let coreRect = CGRect(x: center.x - coreRadius, y: center.y - coreRadius, width: coreRadius * 2, height: coreRadius * 2)
+            context.fill(Path(ellipseIn: coreRect), with: .color(bandColor))
+            context.stroke(Path(ellipseIn: coreRect), with: .color(.white.opacity(0.9)), lineWidth: 1.0)
         }
     }
 
-    // MARK: - Curve math
+    // MARK: - Curve Math Helpers
 
     private func curveGain(at frequency: Float) -> Float {
         var gain = preamp
@@ -342,6 +420,14 @@ struct EQCurveView: View {
 
     private func clampedGain(_ gain: Float) -> Float {
         max(minimumGain, min(maximumGain, gain))
+    }
+
+    private func formatFrequency(_ freq: Float) -> String {
+        if freq >= 1000 {
+            return String(format: "%.1f kHz", freq / 1000)
+        } else {
+            return "\(Int(round(freq))) Hz"
+        }
     }
 
     private var frequencyLabels: [(frequency: Float, label: String)] {

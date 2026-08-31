@@ -10,60 +10,73 @@ struct HeadphoneLibraryView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
+                LazyVStack(alignment: .leading, spacing: 3) {
                     if filtered.isEmpty {
-                        Text(searchText.isEmpty ? "No profiles" : "No matches")
-                            .font(.caption)
+                        Text(searchText.isEmpty ? "No profiles loaded" : "No matching models")
+                            .font(.caption2)
                             .foregroundStyle(.tertiary)
                             .padding(.vertical, 8)
                     } else {
                         ForEach(filtered.prefix(30)) { profile in
                             Button {
-                                viewModel.applyHeadphoneProfile(profile)
+                                withAnimation(.spring(response: 0.2, dampingFraction: 0.7)) {
+                                    viewModel.applyHeadphoneProfile(profile)
+                                }
                             } label: {
-                                HStack {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "headphones")
+                                        .font(.system(size: 11))
+                                        .foregroundStyle(OpenEQTheme.accentCyan)
+                                        .frame(width: 18)
+
                                     VStack(alignment: .leading, spacing: 1) {
                                         Text(profile.displayName)
-                                            .font(.caption)
+                                            .font(.system(size: 11, weight: .semibold))
                                             .foregroundStyle(.primary)
                                             .lineLimit(1)
                                         Text(profile.target)
-                                            .font(.caption2)
+                                            .font(.system(size: 9, weight: .medium, design: .monospaced))
                                             .foregroundStyle(.tertiary)
                                             .lineLimit(1)
                                     }
                                     Spacer(minLength: 0)
                                 }
-                                .padding(.vertical, 6)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 5)
+                                .background(OpenEQTheme.recessedSlotBg.opacity(0.6), in: RoundedRectangle(cornerRadius: 6))
                                 .contentShape(Rectangle())
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(TactileButtonStyle())
                         }
                     }
                 }
             }
             .frame(maxHeight: 140)
 
+            Divider().opacity(0.15)
+
             HStack(spacing: 16) {
-                Button("Import AutoEQ / REW") {
+                Button {
                     viewModel.importCalibrationFile()
+                } label: {
+                    Label("Import AutoEQ / REW", systemImage: "square.and.arrow.down")
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(TactileButtonStyle())
 
                 Button {
                     if let url = URL(string: "https://autoeq.app") {
                         NSWorkspace.shared.open(url)
                     }
                 } label: {
-                    Image(systemName: "safari")
+                    Label("AutoEQ.app", systemImage: "arrow.up.right.square")
                 }
-                .buttonStyle(.borderless)
-                .help("autoeq.app")
+                .buttonStyle(TactileButtonStyle())
+                .help("Open autoeq.app in browser")
             }
-            .font(.caption)
-            .foregroundStyle(.secondary)
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(OpenEQTheme.accentCyan)
 
             if let message = viewModel.calibrationImportMessage {
                 Text(message)
@@ -75,3 +88,4 @@ struct HeadphoneLibraryView: View {
         .onAppear { viewModel.loadHeadphoneCatalogIfNeeded() }
     }
 }
+
