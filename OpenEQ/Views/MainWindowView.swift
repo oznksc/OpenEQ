@@ -3,6 +3,7 @@ import SwiftUI
 struct MainWindowView: View {
     @Bindable var viewModel: OpenEQViewModel
     @State private var selectedTab: MainTab = .equalizer
+    @State private var hoveredTab: MainTab?
     private var graphStore: GraphStore { viewModel.graphStore }
 
     enum MainTab: String, CaseIterable, Identifiable {
@@ -24,10 +25,6 @@ struct MainWindowView: View {
         .frame(width: OpenEQTheme.minWindowWidth, height: OpenEQTheme.minWindowHeight)
         .toolbarTitleDisplayMode(.inline)
         .toolbar { toolbarContent }
-        .inspector(isPresented: $viewModel.showGraphInspector) {
-            NodeInspectorView(store: graphStore, viewModel: viewModel)
-                .inspectorColumnWidth(min: 300, ideal: 320, max: 380)
-        }
         .onAppear { viewModel.refreshAudioProcesses() }
     }
 
@@ -45,6 +42,10 @@ struct MainWindowView: View {
     private var routingPage: some View {
         GraphWorkspaceView(viewModel: viewModel, store: graphStore)
             .navigationTitle("Routing")
+            .inspector(isPresented: $viewModel.showGraphInspector) {
+                NodeInspectorView(store: graphStore, viewModel: viewModel)
+                    .inspectorColumnWidth(min: 300, ideal: 320, max: 380)
+            }
             .toolbar { ToolbarItem(placement: .primaryAction) { Button { viewModel.showGraphInspector.toggle() } label: { Image(systemName: "sidebar.trailing") }.help("Inspector") } }
     }
 
@@ -62,9 +63,34 @@ struct MainWindowView: View {
 
     @ToolbarContentBuilder private var toolbarContent: some ToolbarContent {
         ToolbarItem(placement: .principal) {
-            Picker("Section", selection: $selectedTab) {
-                ForEach(MainTab.allCases) { tab in Label(tab.title, systemImage: tab.icon).tag(tab) }
-            }.pickerStyle(.segmented).controlSize(.small).frame(width: 420).labelsHidden()
+            HStack(spacing: 3) {
+                ForEach(MainTab.allCases) { tab in
+                    Button {
+                        selectedTab = tab
+                    } label: {
+                        Image(systemName: tab.icon)
+                            .font(.body.weight(.semibold))
+                            .imageScale(.large)
+                            .frame(maxWidth: .infinity, minHeight: 30)
+                            .contentShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(selectedTab == tab ? .primary : .secondary)
+                    .background {
+                        Capsule()
+                            .fill(selectedTab == tab ? Color.accentColor.opacity(0.22) : (hoveredTab == tab ? Color.primary.opacity(0.10) : .clear))
+                    }
+                    .onHover { isHovering in
+                        hoveredTab = isHovering ? tab : nil
+                    }
+                    .help(tab.title)
+                    .accessibilityLabel(tab.title)
+                    .accessibilityAddTraits(selectedTab == tab ? .isSelected : [])
+                }
+            }
+            .padding(3)
+            .frame(width: 440, height: 36)
+            .background(.black.opacity(0.16), in: Capsule())
         }
         ToolbarItemGroup(placement: .primaryAction) {
             Button { viewModel.setEnabled(!viewModel.isEnabled) } label: { Label(viewModel.isEnabled ? "EQ" : "Bypass", systemImage: viewModel.isEnabled ? "power.circle.fill" : "power.circle") }.tint(viewModel.isEnabled ? .green : .orange)
