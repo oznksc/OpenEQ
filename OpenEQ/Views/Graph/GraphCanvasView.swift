@@ -11,7 +11,6 @@ struct GraphCanvasView: View {
     @State private var panSession: PanSession?
     @State private var isCanvasFocused = false
     @State private var magnifyBase: CGFloat = 1
-    @State private var inspectedNodeID: UUID? = nil
     @State private var pendingConnectionFrom: GraphPortID?
 
     private struct NodeDragSession: Equatable {
@@ -48,7 +47,7 @@ struct GraphCanvasView: View {
                         .gesture(backgroundPanGesture)
                         .onTapGesture {
                             store.clearSelection()
-                            inspectedNodeID = nil
+                            viewModel.showGraphInspector = false
                             pendingConnectionFrom = nil
                             isCanvasFocused = true
                         }
@@ -112,7 +111,7 @@ struct GraphCanvasView: View {
             .onKeyPress(.escape) {
                 cancelLiveDrag()
                 store.clearSelection()
-                inspectedNodeID = nil
+                viewModel.showGraphInspector = false
                 pendingConnectionFrom = nil
                 return .handled
             }
@@ -155,21 +154,15 @@ struct GraphCanvasView: View {
                 isSelected: store.selectedNodeIDs.contains(node.id) || isDragging,
                 isRunning: runningNodeIDs.contains(node.id),
                 onInspect: {
-                    withAnimation(.easeInOut(duration: 0.15)) {
-                        if inspectedNodeID == node.id {
-                            inspectedNodeID = nil
-                        } else {
-                            inspectedNodeID = node.id
-                        }
-                    }
+                    store.selectNode(node.id)
+                    viewModel.showGraphInspector = true
                 }
             )
             .equatable()
             .contextMenu {
                 Button {
-                    withAnimation(.easeInOut(duration: 0.15)) {
-                        inspectedNodeID = node.id
-                    }
+                    store.selectNode(node.id)
+                    viewModel.showGraphInspector = true
                 } label: {
                     Label("Inspect Details...", systemImage: "slider.horizontal.3")
                 }
@@ -236,57 +229,9 @@ struct GraphCanvasView: View {
                 }
             }
             .gesture(nodeMoveGesture(for: node))
-
-            if inspectedNodeID == node.id {
-                inspectorOverlay(for: node, nodeSize: size, isAbove: origin.y > 220)
-                    .transition(.opacity.combined(with: .scale(scale: 0.95)))
-                    .zIndex(100)
-            }
         }
         .frame(width: size.width, height: size.height)
         .position(x: origin.x + size.width / 2, y: origin.y + size.height / 2)
-        .zIndex(inspectedNodeID == node.id ? 100 : 0)
-    }
-
-    @ViewBuilder
-    private func inspectorOverlay(for node: GraphNode, nodeSize: CGSize, isAbove: Bool) -> some View {
-        let cardWidth: CGFloat = 300
-        VStack(spacing: 0) {
-            if !isAbove {
-                Image(systemName: "arrowtriangle.up.fill")
-                    .font(.system(size: 11))
-                    .foregroundStyle(OpenEQTheme.cardBgElevated)
-                    .offset(y: 2)
-                    .zIndex(2)
-            }
-
-            NodeInspectorView(
-                store: store,
-                viewModel: viewModel,
-                targetNodeID: node.id,
-                onClose: { withAnimation(.easeInOut(duration: 0.12)) { inspectedNodeID = nil } }
-            )
-            .frame(width: cardWidth)
-            .background(OpenEQTheme.cardBgElevated)
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(Color.white.opacity(0.15), lineWidth: 1)
-            )
-            .shadow(color: Color.black.opacity(0.6), radius: 20, x: 0, y: 8)
-
-            if isAbove {
-                Image(systemName: "arrowtriangle.down.fill")
-                    .font(.system(size: 11))
-                    .foregroundStyle(OpenEQTheme.cardBgElevated)
-                    .offset(y: -2)
-                    .zIndex(2)
-            }
-        }
-        .fixedSize()
-        .alignmentGuide(.top) { dimensions in
-            isAbove ? dimensions.height + 8 : -nodeSize.height - 8
-        }
     }
 
     private func nodeMoveGesture(for node: GraphNode) -> some Gesture {

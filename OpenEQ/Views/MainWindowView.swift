@@ -29,6 +29,16 @@ struct MainWindowView: View {
                 }
             }
 
+            if selectedTab == .routing,
+               viewModel.showGraphInspector,
+               graphStore.selectedNode != nil {
+                routingInspectorPanel
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 54)
+                    .transition(.opacity.combined(with: .scale(scale: 0.98)))
+                    .zIndex(10)
+            }
+
             HStack(alignment: .center, spacing: 10) {
                 brandLogoBadge
 
@@ -57,6 +67,7 @@ struct MainWindowView: View {
             .padding(.bottom, 16)
         }
         .animation(.easeInOut(duration: 0.2), value: selectedTab)
+        .animation(.easeInOut(duration: 0.16), value: viewModel.showGraphInspector)
         .frame(width: OpenEQTheme.minWindowWidth, height: OpenEQTheme.minWindowHeight)
         .navigationTitle("")
         .toolbarTitleDisplayMode(.inline)
@@ -88,6 +99,22 @@ struct MainWindowView: View {
         }
         .buttonStyle(TactileButtonStyle(pressedScale: 0.95))
         .help(isGraphRunning ? "Stop Routing (⌘↩)" : "Run Routing (⌘↩)")
+    }
+
+    private var routingInspectorPanel: some View {
+        NodeInspectorView(
+            store: graphStore,
+            viewModel: viewModel,
+            onClose: { viewModel.showGraphInspector = false }
+        )
+        .frame(width: 420)
+        .padding(6)
+        .background(OpenEQTheme.cardBgElevated, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color.white.opacity(0.16), lineWidth: 1)
+        )
+        .shadow(color: Color.black.opacity(0.55), radius: 24, x: 0, y: -8)
     }
 
     private var nodesButton: some View {
