@@ -414,11 +414,15 @@ struct MainWindowView: View {
                         HStack(spacing: 6) {
                             Image(systemName: tab.icon)
                                 .font(.system(size: 12, weight: .semibold))
-                            Text(tab.title)
-                                .font(.system(size: 12, weight: selectedTab == tab ? .bold : .medium))
+                            if selectedTab == tab {
+                                Text(tab.title)
+                                    .font(.system(size: 12, weight: .bold))
+                            }
                         }
                         .foregroundStyle(selectedTab == tab ? .white : .secondary)
-                        .frame(maxWidth: .infinity, minHeight: 30)
+                        .padding(.horizontal, selectedTab == tab ? 10 : 0)
+                        .frame(height: 30)
+                        .frame(width: selectedTab == tab ? nil : 30)
                         .contentShape(Capsule())
                     }
                     .buttonStyle(.plain)
@@ -444,7 +448,7 @@ struct MainWindowView: View {
                 }
             }
             .padding(3)
-            .frame(width: 560, height: 36)
+            .frame(height: 36)
             .background {
                 Capsule()
                     .fill(OpenEQTheme.recessedSlotBg)
