@@ -11,10 +11,10 @@ struct MainWindowView: View {
     private var graphStore: GraphStore { viewModel.graphStore }
 
     enum MainTab: String, CaseIterable, Identifiable {
-        case equalizer, routing, library, system
+        case equalizer, comfort, routing, library, system
         var id: Self { self }
-        var title: String { [Self.equalizer: "Equalizer", .routing: "Routing", .library: "Library", .system: "System Audio"][self]! }
-        var icon: String { [Self.equalizer: "slider.vertical.3", .routing: "point.3.connected.trianglepath.dotted", .library: "square.stack.3d.up", .system: "waveform.badge.magnifyingglass"][self]! }
+        var title: String { [Self.equalizer: "Equalizer", .comfort: "Comfort", .routing: "Routing", .library: "Library", .system: "System Audio"][self]! }
+        var icon: String { [Self.equalizer: "slider.vertical.3", .comfort: "ear.and.waveform", .routing: "point.3.connected.trianglepath.dotted", .library: "square.stack.3d.up", .system: "waveform.badge.magnifyingglass"][self]! }
     }
 
     var body: some View {
@@ -25,6 +25,7 @@ struct MainWindowView: View {
             Group {
                 switch selectedTab {
                 case .equalizer: equalizerPage
+                case .comfort: comfortPage
                 case .routing: routingPage
                 case .library: libraryPage
                 case .system: SystemAudioView(viewModel: viewModel)
@@ -262,7 +263,6 @@ struct MainWindowView: View {
     private var equalizerPage: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                ListeningComfortView(viewModel: viewModel)
                 EqualizerView(viewModel: viewModel)
                 SpectrumView(
                     title: viewModel.spectrumTitle,
@@ -276,6 +276,32 @@ struct MainWindowView: View {
             }
             .padding(24)
             .frame(maxWidth: 1100, alignment: .leading)
+            .frame(maxWidth: .infinity)
+        }
+        .scrollContentBackground(.hidden)
+        .background(OpenEQTheme.chassisBg)
+    }
+
+    private var comfortPage: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                HStack(spacing: 8) {
+                    Image(systemName: "ear.and.waveform")
+                        .font(.title3)
+                        .foregroundStyle(OpenEQTheme.accentPurple)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Listening Comfort")
+                            .font(.title3.weight(.bold))
+                        Text("Keep an eye on session load and give your ears an easier listen.")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                ListeningComfortView(viewModel: viewModel)
+            }
+            .padding(24)
+            .frame(maxWidth: 820, alignment: .leading)
             .frame(maxWidth: .infinity)
         }
         .scrollContentBackground(.hidden)
@@ -385,7 +411,7 @@ struct MainWindowView: View {
                 }
             }
             .padding(3)
-            .frame(width: 480, height: 36)
+            .frame(width: 560, height: 36)
             .background {
                 Capsule()
                     .fill(OpenEQTheme.recessedSlotBg)
