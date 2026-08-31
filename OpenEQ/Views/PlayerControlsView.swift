@@ -29,12 +29,12 @@ struct PlayerControlsView: View {
             if #available(macOS 26.0, *) {
                 controlRow.glassEffect(
                     .regular.interactive(),
-                    in: RoundedRectangle(cornerRadius: OpenEQTheme.playerBarCornerRadius, style: .continuous)
+                    in: Capsule()
                 )
             } else {
                 controlRow.background(
                     .thinMaterial,
-                    in: RoundedRectangle(cornerRadius: OpenEQTheme.playerBarCornerRadius, style: .continuous)
+                    in: Capsule()
                 )
             }
         }
@@ -98,6 +98,7 @@ struct PlayerControlsView: View {
             .accessibilityLabel(viewModel.playbackState == .playing ? "Pause" : "Play")
         }
         .imageScale(.medium)
+        .font(.body.weight(.semibold))
         .foregroundStyle(.primary)
     }
 
@@ -125,6 +126,8 @@ struct PlayerControlsView: View {
                 .foregroundStyle(.secondary)
                 .frame(width: 36, alignment: .trailing)
         }
+        .imageScale(.large)
+        .font(.body.weight(.semibold))
         .frame(maxWidth: .infinity)
     }
 
