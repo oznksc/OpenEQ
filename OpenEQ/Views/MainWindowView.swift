@@ -14,13 +14,21 @@ struct MainWindowView: View {
     }
 
     var body: some View {
-        Group {
-            switch selectedTab {
-            case .equalizer: equalizerPage
-            case .routing: routingPage
-            case .library: libraryPage
-            case .system: SystemAudioView(viewModel: viewModel)
+        ZStack(alignment: .bottom) {
+            Group {
+                switch selectedTab {
+                case .equalizer: equalizerPage
+                case .routing: routingPage
+                case .library: libraryPage
+                case .system: SystemAudioView(viewModel: viewModel)
+                }
             }
+
+            PlayerControlsView(viewModel: viewModel)
+                .frame(maxWidth: 760)
+                .padding(.horizontal, 24)
+                .padding(.bottom, 16)
+                .shadow(color: .black.opacity(0.28), radius: 18, y: 8)
         }
         .frame(width: OpenEQTheme.minWindowWidth, height: OpenEQTheme.minWindowHeight)
         .toolbarTitleDisplayMode(.inline)
@@ -31,7 +39,6 @@ struct MainWindowView: View {
     private var equalizerPage: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                PlayerControlsView(viewModel: viewModel)
                 EqualizerView(viewModel: viewModel)
                 SpectrumView(title: viewModel.spectrumTitle, warning: viewModel.spectrumWarning, levels: viewModel.spectrumLevels, leftLevel: viewModel.leftLevel, rightLevel: viewModel.rightLevel, peakLevel: viewModel.peakLevel, isClipping: viewModel.isClipping)
             }
