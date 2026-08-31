@@ -414,6 +414,13 @@ final class SystemAudioEQEngine {
     }
 
     private func deviceID(forUID uid: String) throws -> AudioDeviceID {
+        guard let deviceID = existingDeviceID(forUID: uid) else {
+            throw SystemAudioEQError.failed("Unknown output device UID")
+        }
+        return deviceID
+    }
+
+    private func existingDeviceID(forUID uid: String) -> AudioDeviceID? {
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioHardwarePropertyTranslateUIDToDevice,
             mScope: kAudioObjectPropertyScopeGlobal,
@@ -432,9 +439,7 @@ final class SystemAudioEQEngine {
                 &deviceID
             )
         }
-        guard status == noErr else {
-            throw SystemAudioEQError.failed("Unknown output device UID")
-        }
+        guard status == noErr, deviceID != kAudioObjectUnknown else { return nil }
         return deviceID
     }
 
@@ -465,10 +470,18 @@ final class SystemAudioEQEngine {
         ]
 
         var newAggID = AudioObjectID(kAudioObjectUnknown)
-        let err = AudioHardwareCreateAggregateDevice(desc as CFDictionary, &newAggID)
+        var err = AudioHardwareCreateAggregateDevice(desc as CFDictionary, &newAggID)
+        if err == kAudioHardwareIllegalOperationError {
+            // Aggregate destruction is asynchronous. A fast stop/start can therefore
+            // briefly leave the old UID reserved and make the next create return 'nope'.
+            logger.warning("Aggregate create returned nope; cleaning the stable UID and retrying")
+            destroyStaleAggregateIfNeeded()
+            newAggID = AudioObjectID(kAudioObjectUnknown)
+            err = AudioHardwareCreateAggregateDevice(desc as CFDictionary, &newAggID)
+        }
         guard err == noErr else {
             throw SystemAudioEQError.failed(
-                "Create aggregate failed (\(err) / \(fourCC(err)))."
+                "Create aggregate failed (\(err) / \(fourCC(err))). Select a physical output and retry."
             )
         }
         aggDeviceID = newAggID
@@ -1288,29 +1301,35 @@ final class SystemAudioEQEngine {
     }
 
     private func destroyStaleAggregateIfNeeded() {
-        // Look up previous OpenEQ aggregate by stable UID and destroy it.
-        var address = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyTranslateUIDToDevice,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        var deviceID = AudioObjectID(kAudioObjectUnknown)
-        var size = UInt32(MemoryLayout<AudioObjectID>.size)
-        var uid = kOpenEQAggregateUID as CFString
-        let err = withUnsafeMutablePointer(to: &uid) { uidPtr in
-            AudioObjectGetPropertyData(
-                kOpenEQSysObj,
-                &address,
-                UInt32(MemoryLayout<CFString>.size),
-                uidPtr,
-                &size,
-                &deviceID
-            )
-        }
-        if err == noErr, deviceID != kAudioObjectUnknown {
+        if let deviceID = existingDeviceID(forUID: kOpenEQAggregateUID) {
+            if let defaultID = try? getDefaultOutputDeviceID(),
+               defaultID == deviceID,
+               physicalOutputID != kAudioObjectUnknown,
+               physicalOutputID != deviceID {
+                try? setDefaultOutput(physicalOutputID)
+            }
             logger.info("Destroying stale OpenEQ aggregate \(deviceID)")
-            AudioHardwareDestroyAggregateDevice(deviceID)
+            destroyAggregateDeviceAndWait(deviceID)
         }
+    }
+
+    private func destroyAggregateDeviceAndWait(_ deviceID: AudioDeviceID) {
+        guard deviceID != kAudioObjectUnknown else { return }
+        let status = AudioHardwareDestroyAggregateDevice(deviceID)
+        guard status == noErr else {
+            logger.warning("Destroy aggregate \(deviceID) failed (\(status) / \(fourCC(status)))")
+            return
+        }
+
+        // Core Audio documents destruction as asynchronous. Wait briefly for the
+        // stable UID to disappear before allowing another aggregate to be created.
+        for _ in 0..<20 {
+            guard let currentID = existingDeviceID(forUID: kOpenEQAggregateUID), currentID == deviceID else {
+                return
+            }
+            usleep(25_000)
+        }
+        logger.warning("Aggregate \(deviceID) is still being removed by Core Audio")
     }
 
     // MARK: - Cleanup
@@ -1325,7 +1344,7 @@ final class SystemAudioEQEngine {
 
     private func destroyAggregate() {
         if aggDeviceID != kAudioObjectUnknown {
-            AudioHardwareDestroyAggregateDevice(aggDeviceID)
+            destroyAggregateDeviceAndWait(aggDeviceID)
             aggDeviceID = kAudioObjectUnknown
         }
     }
