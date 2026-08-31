@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 struct MainWindowView: View {
     @Bindable var viewModel: OpenEQViewModel
@@ -27,19 +28,53 @@ struct MainWindowView: View {
                 }
             }
 
-            if selectedTab != .routing {
-                PlayerControlsView(viewModel: viewModel)
-                    .frame(maxWidth: 780)
-                    .padding(.horizontal, 24)
-                    .padding(.bottom, 16)
-                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+            HStack(alignment: .center, spacing: 16) {
+                brandLogoBadge
+
+                Spacer(minLength: 0)
+
+                if selectedTab != .routing {
+                    PlayerControlsView(viewModel: viewModel)
+                        .frame(maxWidth: 760)
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                }
+
+                Spacer(minLength: 0)
+
+                Color.clear
+                    .frame(width: 100, height: 1)
             }
+            .padding(.horizontal, 24)
+            .padding(.bottom, 16)
         }
         .animation(.easeInOut(duration: 0.2), value: selectedTab)
         .frame(width: OpenEQTheme.minWindowWidth, height: OpenEQTheme.minWindowHeight)
+        .navigationTitle("")
         .toolbarTitleDisplayMode(.inline)
         .toolbar { toolbarContent }
         .onAppear { viewModel.refreshAudioProcesses() }
+    }
+
+    private var brandLogoBadge: some View {
+        HStack(spacing: 8) {
+            Image(nsImage: NSApplication.shared.applicationIconImage)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 22, height: 22)
+                .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+
+            Text("OpenEQ")
+                .font(.system(size: 12, weight: .bold, design: .rounded))
+                .foregroundStyle(.primary)
+                .tracking(0.3)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(OpenEQTheme.cardBgElevated, in: Capsule())
+        .overlay(
+            Capsule()
+                .stroke(Color.white.opacity(0.1), lineWidth: 0.8)
+        )
     }
 
     private var equalizerPage: some View {

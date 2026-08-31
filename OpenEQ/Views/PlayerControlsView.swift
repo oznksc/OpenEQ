@@ -64,7 +64,7 @@ struct PlayerControlsView: View {
                     .foregroundStyle(.tertiary)
             }
         }
-        .frame(minWidth: 110, maxWidth: 150, alignment: .leading)
+        .frame(minWidth: 100, maxWidth: 140, alignment: .leading)
     }
 
     private var transport: some View {
