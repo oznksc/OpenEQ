@@ -159,7 +159,7 @@ final class OpenEQViewModel {
     var conflictingHALPlugins: [String] = []
     var graphStore = GraphStore()
     var audioProcesses: [AudioProcessInfo] = []
-    var showGraphInspector = true
+    var showGraphInspector = false
     var graphRuntimeLabel: String?
     /// Set while a graph chain is actively driven by Run Graph.
     var runningGraphNodeIDsOverride: Set<UUID> = []
