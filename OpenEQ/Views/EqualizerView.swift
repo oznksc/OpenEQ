@@ -22,29 +22,23 @@ struct EqualizerView: View {
                     .accessibilityLabel("Equalizer")
                     .accessibilityValue(viewModel.isEnabled ? "On" : "Off")
 
-                Picker("Mode", selection: Binding(
-                    get: { viewModel.eqMode },
-                    set: { viewModel.setEQMode($0) }
-                )) {
-                    ForEach(EQMode.allCases) { mode in
-                        Text(mode.title).tag(mode)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .frame(maxWidth: 200)
-                .labelsHidden()
-                .accessibilityLabel("EQ mode")
+                StudioSegmentedPicker(
+                    selection: Binding(
+                        get: { viewModel.eqMode },
+                        set: { viewModel.setEQMode($0) }
+                    ),
+                    items: EQMode.allCases,
+                    titleFor: { $0.title }
+                )
+                .frame(width: 190)
 
                 if viewModel.eqMode == .graphic {
-                    Picker("Bands", selection: bandCountBinding) {
-                        ForEach(GraphicBandCount.allCases) { count in
-                            Text(count.title).tag(count)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .frame(maxWidth: 140)
-                    .labelsHidden()
-                    .accessibilityLabel("Band count")
+                    StudioSegmentedPicker(
+                        selection: bandCountBinding,
+                        items: GraphicBandCount.allCases,
+                        titleFor: { $0.title }
+                    )
+                    .frame(width: 150)
                 }
             }
 

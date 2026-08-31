@@ -259,13 +259,19 @@ struct SystemAudioView: View {
                 Text("Feedback / howling protection")
             }
 
-            Picker("Mode", selection: Binding(
-                get: { viewModel.systemAudioMode },
-                set: { viewModel.setSystemAudioMode($0) }
-            )) {
-                ForEach(SystemAudioMode.allCases) { mode in
-                    Text(mode.title).tag(mode)
-                }
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Mode")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+
+                StudioSegmentedPicker(
+                    selection: Binding(
+                        get: { viewModel.systemAudioMode },
+                        set: { viewModel.setSystemAudioMode($0) }
+                    ),
+                    items: SystemAudioMode.allCases,
+                    titleFor: { $0.title }
+                )
             }
 
             Text(viewModel.systemAudioMode.description)

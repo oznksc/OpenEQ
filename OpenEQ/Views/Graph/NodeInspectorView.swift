@@ -78,18 +78,17 @@ struct NodeInspectorView: View {
             ))
             .toggleStyle(.switch)
 
-            Picker("Mode", selection: Binding(
-                get: { eq.mode },
-                set: { mode in
-                    store.updateEqualizer(nodeID: nodeID) { $0.mode = mode }
-                    syncLegacyEQ(from: store.document.node(id: nodeID))
-                }
-            )) {
-                ForEach(EQMode.allCases) { mode in
-                    Text(mode.title).tag(mode)
-                }
-            }
-            .pickerStyle(.segmented)
+            StudioSegmentedPicker(
+                selection: Binding(
+                    get: { eq.mode },
+                    set: { mode in
+                        store.updateEqualizer(nodeID: nodeID) { $0.mode = mode }
+                        syncLegacyEQ(from: store.document.node(id: nodeID))
+                    }
+                ),
+                items: EQMode.allCases,
+                titleFor: { $0.title }
+            )
 
             EQCurveView(
                 bands: eq.bands,
