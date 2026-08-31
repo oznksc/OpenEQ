@@ -29,7 +29,7 @@ struct MainWindowTabContent: View {
                 title: viewModel.spectrumTitle,
                 isSystemAudio: viewModel.isSystemAudioVisualizationActive
             )
-                .padding(.bottom, 18)
+                .offset(y: 68)
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
@@ -229,7 +229,7 @@ private struct SpectrumBackdropView: View {
             .padding(.bottom, 25)
         }
         .frame(maxWidth: .infinity)
-        .frame(height: 360)
+        .frame(height: 320)
         .padding(.horizontal, 24)
         .opacity(0.8)
         .allowsHitTesting(false)
