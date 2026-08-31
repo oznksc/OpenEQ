@@ -3,13 +3,13 @@ import SwiftUI
 struct SpectrumView: View {
     let title: String
     let warning: String?
-    let levels: [Float]
+    let levels: SpectrumLevels
     let leftLevel: Float
     let rightLevel: Float
     let peakLevel: Float
     let isClipping: Bool
 
-    @State private var peakLevels: [Float] = Array(repeating: 0, count: SpectrumAnalyzer.barCount)
+    @State private var peakLevels = SpectrumLevels()
 
     var body: some View {
         VStack(alignment: .leading, spacing: OpenEQTheme.controlSpacing) {
@@ -124,7 +124,7 @@ struct SpectrumView: View {
         }
     }
 
-    private func updatePeaks(with current: [Float]) {
+    private func updatePeaks(with current: SpectrumLevels) {
         if peakLevels.count != current.count {
             peakLevels = current
             return
@@ -143,10 +143,9 @@ struct SpectrumView: View {
     SpectrumView(
         title: "Spectrum",
         warning: nil,
-        levels: Array(repeating: 0.35, count: SpectrumAnalyzer.barCount),
+        levels: SpectrumLevels(repeating: 0.35),
         leftLevel: 0.6, rightLevel: 0.55, peakLevel: 0.6, isClipping: false
     )
     .padding(24)
     .frame(height: 280)
 }
-

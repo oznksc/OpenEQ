@@ -6,12 +6,12 @@ final class ListeningComfortEngine {
     private var exposure: Double = 0
     private var smoothedPressure: Float = 0
 
-    func update(
+    func update<Levels: Collection>(
         peakLevel: Float,
-        spectrumLevels: [Float],
+        spectrumLevels: Levels,
         isActive: Bool,
         elapsed: TimeInterval
-    ) -> ListeningComfortState {
+    ) -> ListeningComfortState where Levels.Element == Float {
         let safeElapsed = max(0, min(elapsed, 5))
         let loudnessPressure = pressure(for: peakLevel)
         let spectralStrain = highFrequencyStrain(in: spectrumLevels)
@@ -61,10 +61,10 @@ final class ListeningComfortEngine {
         return max(0, min(1, (peakDB + 24) / 24))
     }
 
-    private func highFrequencyStrain(in levels: [Float]) -> Float {
+    private func highFrequencyStrain<Levels: Collection>(in levels: Levels) -> Float where Levels.Element == Float {
         guard !levels.isEmpty else { return 0 }
         let start = max(0, levels.count * 3 / 4)
-        let highBandLevels = levels[start...]
+        let highBandLevels = levels.dropFirst(start)
         let average = highBandLevels.reduce(0, +) / Float(highBandLevels.count)
         return max(0, min(1, average))
     }

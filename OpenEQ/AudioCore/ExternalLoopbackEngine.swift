@@ -185,7 +185,8 @@ final class ExternalLoopbackEngine {
                 return
             }
 
-            DispatchQueue.main.async {
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
                 self.onAnalysis?(analysis)
             }
         }

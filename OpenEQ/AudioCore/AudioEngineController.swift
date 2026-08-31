@@ -13,7 +13,7 @@ import Observation
 final class AudioEngineController {
     private(set) var playbackState: AudioEngineState = .idle
     private(set) var currentPreset: EQPreset = .flatPreset()
-    private(set) var spectrumLevels: [Float] = Array(repeating: 0.0, count: SpectrumAnalyzer.barCount)
+    private(set) var spectrumLevels = SpectrumLevels()
     private(set) var leftLevel: Float = 0.0
     private(set) var rightLevel: Float = 0.0
     private(set) var peakLevel: Float = 0.0
@@ -631,8 +631,9 @@ final class AudioEngineController {
                 return
             }
 
-            DispatchQueue.main.async {
-                self.spectrumLevels = Array(analysis.levels)
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.spectrumLevels = analysis.levels
                 self.leftLevel = analysis.leftPeak
                 self.rightLevel = analysis.rightPeak
                 self.peakLevel = analysis.peakLevel
@@ -661,7 +662,7 @@ final class AudioEngineController {
         let analysis = analyzer.reset()
 
         let update = {
-            self.spectrumLevels = Array(analysis.levels)
+            self.spectrumLevels = analysis.levels
             self.leftLevel = analysis.leftPeak
             self.rightLevel = analysis.rightPeak
             self.peakLevel = analysis.peakLevel

@@ -29,6 +29,7 @@ final class SystemAudioEQEngine {
 
     private let ioQueue = DispatchQueue(label: "com.openeq.system-audio-eq.io", qos: .userInteractive)
     private let analysisQueue = DispatchQueue(label: "com.openeq.system-audio-eq.analysis", qos: .utility)
+    private let analysisWakeup = DispatchSemaphore(value: 0)
     private var tapID = AudioObjectID(kAudioObjectUnknown)
     private var tapUUIDString: String?
     private var aggDeviceID = AudioObjectID(kAudioObjectUnknown)
@@ -52,6 +53,11 @@ final class SystemAudioEQEngine {
     private var analysisBufferCapacity = 0
     private var analysisPending = false
     private var analysisSlot = 0
+    private var analysisWorkSlot = 0
+    private var analysisWorkChannels = 0
+    private var analysisWorkFrames = 0
+    private var analysisWorkSampleRate: Double = 48000
+    private var isAnalysisWorkerStopping = false
     private var analysisFramesSinceLast = 0
     private var droppedAnalysisBuffers: UInt64 = 0
     private var hasScheduledTapAudioPublication = false
@@ -64,12 +70,23 @@ final class SystemAudioEQEngine {
     init() {
         prepareScratch(capacity: Self.defaultScratchCapacity)
         prepareAnalysisBuffers(capacity: 1024)
+
+        let wakeup = analysisWakeup
+        analysisQueue.async { [weak self] in
+            while wakeup.wait(timeout: .distantFuture) == .success {
+                guard let self else { return }
+                guard !self.isAnalysisWorkerStopping else { return }
+                self.processPendingAnalysis()
+            }
+        }
     }
 
     deinit {
         stopObservingDefaultOutput()
         stop()
         freeScratch()
+        isAnalysisWorkerStopping = true
+        analysisWakeup.signal()
         analysisQueue.sync { }
         freeAnalysisBuffers()
     }
@@ -676,6 +693,10 @@ final class SystemAudioEQEngine {
         let slot = analysisSlot
         analysisSlot = (analysisSlot + 1) % 2
         analysisPending = true
+        analysisWorkSlot = slot
+        analysisWorkChannels = channels
+        analysisWorkFrames = frames
+        analysisWorkSampleRate = sampleRate
         let buffers = analysisBuffers[slot]
         for channel in 0..<channels {
             guard let source = outBuffers[nonInterleaved ? channel : 0].mData else { continue }
@@ -687,20 +708,24 @@ final class SystemAudioEQEngine {
                 for frame in 0..<frames { destination[frame] = input[frame * max(1, Int(first.mNumberChannels)) + channel] }
             }
         }
-        let rate = sampleRate
-        analysisQueue.async { [weak self] in
-            guard let self else { return }
-            let result = self.analyzer.analyze(
-                left: buffers[0],
-                right: channels > 1 ? buffers[1] : nil,
-                frameLength: frames,
-                sampleRate: rate
-            )
-            if let result {
-                DispatchQueue.main.async { [weak self] in self?.onAnalysis?(result) }
-            }
-            self.ioQueue.async { [weak self] in self?.analysisPending = false }
+        analysisWakeup.signal()
+    }
+
+    private func processPendingAnalysis() {
+        let buffers = analysisBuffers[analysisWorkSlot]
+        let channels = analysisWorkChannels
+        let frames = analysisWorkFrames
+        let rate = analysisWorkSampleRate
+        let result = analyzer.analyze(
+            left: buffers[0],
+            right: channels > 1 ? buffers[1] : nil,
+            frameLength: frames,
+            sampleRate: rate
+        )
+        if let result {
+            DispatchQueue.main.async { [weak self] in self?.onAnalysis?(result) }
         }
+        ioQueue.async { [weak self] in self?.analysisPending = false }
     }
 
     private func isNonInterleaved(_ buffers: UnsafeMutableAudioBufferListPointer) -> Bool {

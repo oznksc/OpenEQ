@@ -12,7 +12,7 @@ final class SystemAudioManager {
     private(set) var availableInputDevices: [AudioDevice] = []
     private(set) var availableOutputDevices: [AudioDevice] = []
     private(set) var detectedBlackHoleDevice: AudioDevice?
-    private(set) var spectrumLevels: [Float] = Array(repeating: 0.0, count: SpectrumAnalyzer.barCount)
+    private(set) var spectrumLevels = SpectrumLevels()
     private(set) var leftLevel: Float = 0.0
     private(set) var rightLevel: Float = 0.0
     private(set) var peakLevel: Float = 0.0
@@ -41,6 +41,9 @@ final class SystemAudioManager {
     private var rebuildWorkItem: DispatchWorkItem?
     private var lastSystemEQPreset: EQPreset = .flatPreset()
     private var loopbackFeedbackGuard = FeedbackGuard()
+    private let workspaceObserverStore = WorkspaceObserverStore(
+        center: NSWorkspace.shared.notificationCenter
+    )
 
     convenience init() {
         self.init(
@@ -381,7 +384,7 @@ final class SystemAudioManager {
         let center = NSWorkspace.shared.notificationCenter
 
         // Observers live for the process lifetime (manager is owned by the app ViewModel).
-        center.addObserver(
+        let willSleepToken = center.addObserver(
             forName: NSWorkspace.willSleepNotification,
             object: nil,
             queue: .main
@@ -391,7 +394,7 @@ final class SystemAudioManager {
             }
         }
 
-        center.addObserver(
+        let didWakeToken = center.addObserver(
             forName: NSWorkspace.didWakeNotification,
             object: nil,
             queue: .main
@@ -400,6 +403,9 @@ final class SystemAudioManager {
                 self?.handleDidWake()
             }
         }
+
+        workspaceObserverStore.add(willSleepToken)
+        workspaceObserverStore.add(didWakeToken)
     }
 
     private func handleWillSleep() {
@@ -527,7 +533,7 @@ final class SystemAudioManager {
     }
 
     private func applyAnalysis(_ analysis: SpectrumAnalysis) {
-        spectrumLevels = Array(analysis.levels)
+        spectrumLevels = analysis.levels
         leftLevel = analysis.leftPeak
         rightLevel = analysis.rightPeak
         peakLevel = analysis.peakLevel
@@ -535,7 +541,7 @@ final class SystemAudioManager {
     }
 
     private func resetAnalysis() {
-        spectrumLevels = Array(repeating: 0.0, count: SpectrumAnalyzer.barCount)
+        spectrumLevels = SpectrumLevels()
         leftLevel = 0
         rightLevel = 0
         peakLevel = 0
@@ -546,5 +552,24 @@ final class SystemAudioManager {
         rebuildWorkItem?.cancel()
         if mode == .systemEQ { stopSystemEQ() }
         if mode == .externalLoopback { stopExternalLoopback() }
+    }
+}
+
+private final class WorkspaceObserverStore {
+    private let center: NotificationCenter
+    private var tokens: [NSObjectProtocol] = []
+
+    init(center: NotificationCenter) {
+        self.center = center
+    }
+
+    func add(_ token: NSObjectProtocol) {
+        tokens.append(token)
+    }
+
+    deinit {
+        for token in tokens {
+            center.removeObserver(token)
+        }
     }
 }

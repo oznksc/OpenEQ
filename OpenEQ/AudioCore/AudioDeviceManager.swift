@@ -328,6 +328,7 @@ final class AudioDeviceManager {
             listenerQueue,
             devicesChangedBlock
         )
+        isObservingDeviceChanges = false
     }
 }
 
