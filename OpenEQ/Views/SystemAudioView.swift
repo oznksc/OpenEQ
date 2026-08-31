@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SystemAudioView: View {
     let viewModel: OpenEQViewModel
+    var contentBottomPadding: CGFloat = 0
 
     var body: some View {
         NavigationStack {
@@ -53,6 +54,13 @@ struct SystemAudioView: View {
                         Label("Emergency Stop / Safe Mode", systemImage: "exclamationmark.octagon.fill")
                     }
                     .help("Immediately stop system processing and restore the original output device.")
+                }
+
+                if contentBottomPadding > 0 {
+                    Color.clear
+                        .frame(height: contentBottomPadding)
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
                 }
             }
             .formStyle(.grouped)

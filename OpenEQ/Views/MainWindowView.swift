@@ -7,8 +7,17 @@ struct MainWindowView: View {
     @State private var selectedTab: MainTab = .equalizer
     @State private var hoveredTab: MainTab?
     @State private var isShowingNodePalette = false
+    @State private var bottomBarHeight = OpenEQTheme.bottomBarReservedSpace
     private let comfortTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     private var graphStore: GraphStore { viewModel.graphStore }
+
+    private struct BottomBarHeightPreferenceKey: PreferenceKey {
+        static let defaultValue: CGFloat = 0
+
+        static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+            value = max(value, nextValue())
+        }
+    }
 
     enum MainTab: String, CaseIterable, Identifiable {
         case equalizer, comfort, routing, library, system
@@ -18,7 +27,7 @@ struct MainWindowView: View {
     }
 
     var body: some View {
-        ZStack(alignment: .bottom) {
+        ZStack {
             // Main Chassis Background
             OpenEQTheme.chassisBg.ignoresSafeArea()
 
@@ -28,10 +37,9 @@ struct MainWindowView: View {
                 case .comfort: comfortPage
                 case .routing: routingPage
                 case .library: libraryPage
-                case .system: SystemAudioView(viewModel: viewModel)
+                case .system: SystemAudioView(viewModel: viewModel, contentBottomPadding: bottomContentPadding)
                 }
             }
-            .padding(.bottom, OpenEQTheme.bottomBarReservedSpace)
 
             if selectedTab == .routing,
                viewModel.showGraphInspector,
@@ -42,28 +50,9 @@ struct MainWindowView: View {
                     .transition(.opacity.combined(with: .scale(scale: 0.98)))
                     .zIndex(10)
             }
-
-            HStack(alignment: .center, spacing: 10) {
-                brandLogoBadge
-
-                if selectedTab == .routing {
-                    nodesButton
-                }
-
-                Spacer(minLength: 0)
-
-                if selectedTab != .routing {
-                    PlayerControlsView(viewModel: viewModel)
-                        .frame(maxWidth: 760)
-                        .transition(.opacity.combined(with: .move(edge: .bottom)))
-                }
-
-                Spacer(minLength: 0)
-
-                bottomTrailingControls
-            }
-            .padding(.horizontal, 24)
-            .padding(.bottom, 16)
+        }
+        .overlay(alignment: .bottom) {
+            bottomBar
         }
         .animation(.easeInOut(duration: 0.2), value: selectedTab)
         .animation(.easeInOut(duration: 0.16), value: viewModel.showGraphInspector)
@@ -72,8 +61,48 @@ struct MainWindowView: View {
         .toolbarTitleDisplayMode(.inline)
         .toolbar { toolbarContent }
         .onAppear { viewModel.refreshAudioProcesses() }
+        .onPreferenceChange(BottomBarHeightPreferenceKey.self) { height in
+            guard height > 0, abs(height - bottomBarHeight) > 0.5 else { return }
+            bottomBarHeight = height
+        }
         .onReceive(comfortTimer) { _ in
             viewModel.updateListeningComfort(elapsed: 1)
+        }
+    }
+
+    private var bottomContentPadding: CGFloat {
+        bottomBarHeight * 1.1
+    }
+
+    private var bottomBar: some View {
+        HStack(alignment: .center, spacing: 10) {
+            brandLogoBadge
+
+            if selectedTab == .routing {
+                nodesButton
+            }
+
+            Spacer(minLength: 0)
+
+            if selectedTab != .routing {
+                PlayerControlsView(viewModel: viewModel)
+                    .frame(maxWidth: 760)
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+            }
+
+            Spacer(minLength: 0)
+
+            bottomTrailingControls
+        }
+        .padding(.horizontal, 24)
+        .padding(.bottom, 16)
+        .background {
+            GeometryReader { geometry in
+                Color.clear.preference(
+                    key: BottomBarHeightPreferenceKey.self,
+                    value: geometry.size.height
+                )
+            }
         }
     }
 
@@ -276,6 +305,7 @@ struct MainWindowView: View {
                 )
             }
             .padding(24)
+            .padding(.bottom, bottomContentPadding)
             .frame(maxWidth: 1100, alignment: .leading)
             .frame(maxWidth: .infinity)
         }
@@ -302,6 +332,7 @@ struct MainWindowView: View {
                 ListeningComfortView(viewModel: viewModel)
             }
             .padding(24)
+            .padding(.bottom, bottomContentPadding)
             .frame(maxWidth: 820, alignment: .leading)
             .frame(maxWidth: .infinity)
         }
@@ -341,6 +372,7 @@ struct MainWindowView: View {
                 }
             }
             .padding(24)
+            .padding(.bottom, bottomContentPadding)
             .frame(maxWidth: 780, alignment: .leading)
             .frame(maxWidth: .infinity)
         }
