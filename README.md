@@ -21,6 +21,7 @@ OpenEQ is a lightweight desktop EQ for:
 - **AUv3 insert** on the local playback chain (effect plugins)
 - **Headphone library** (AutoEQ-style) + import AutoEQ / REW calibration files
 - Real-time **64-band FFT spectrum** (Canvas + vDSP)
+- **Comfort Guard:** local-only listening-load tracking from live peak/spectrum data, with break guidance and optional reversible treble relief
 - Built-in presets + custom save/import/export (JSON)
 - Menu bar: bypass, volume, recent presets, playback controls
 
@@ -61,6 +62,7 @@ SwiftUI Views → OpenEQViewModel → AudioEngineController   (local files)
 - Local path: `AVAudioEngine` + `AVAudioPlayerNode` + `AVAudioUnitEQ` + peak limiter  
 - System path: `CATapDescription` + aggregate device + manual biquad DSP + peak limiter  
 - Spectrum: vDSP FFT, Hanning window, decay smoothing  
+- Comfort Guard: explainable relative load score from output peak and high-frequency energy; it is not a calibrated SPL or medical measurement
 
 See [docs/architecture.md](docs/architecture.md), [docs/ROADMAP.md](docs/ROADMAP.md).
 

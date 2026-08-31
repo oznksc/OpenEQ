@@ -14,6 +14,7 @@ Current technical status, completed work, open gaps, roadmap, and test protocols
 | Presets + menu bar | **Production** | JSON store, recent presets, volume, emergency stop |
 | System-Wide EQ (CATap) | **Production-grade experimental** | One-click, feedback guard, sleep/wake, device profiles |
 | External loopback | **Advanced / beta** | Requires BlackHole + correct macOS I/O defaults |
+| Comfort Guard | **New / local** | Relative listening-load guidance from FFT + peak data; no mic, account, or network |
 | Virtual driver (HAL/DriverKit) | **Researched / deferred** | See `docs/virtual-driver.md` — CATap is primary |
 | AutoEQ / AUv3 / iOS | **Not started** | Phase 3–4 |
 
@@ -53,6 +54,12 @@ Current technical status, completed work, open gaps, roadmap, and test protocols
 1. **Headphone library** — curated AutoEQ-style 10-band profiles + search/apply.
 2. **Calibration import** — AutoEQ GraphicEQ/ParametricEQ, REW Equalizer APO, FR CSV.
 3. **Platform docs** — iOS/visionOS expansion plan; multi-channel foundation types.
+
+### Completed in Phase 5 (comfort intelligence)
+
+1. **Comfort Guard** — tracks a relative session-load score from live peak and high-frequency spectrum energy.
+2. **Safe relief action** — optional reversible treble reduction with preamp headroom; disabled unless the user chooses Auto-soothe or Gentle relief.
+3. **Privacy boundary** — no microphone, cloud model, account, or audio recording is used.
 
 ### Remaining gaps
 

@@ -1,11 +1,13 @@
 import SwiftUI
 import AppKit
+import Combine
 
 struct MainWindowView: View {
     @Bindable var viewModel: OpenEQViewModel
     @State private var selectedTab: MainTab = .equalizer
     @State private var hoveredTab: MainTab?
     @State private var isShowingNodePalette = false
+    private let comfortTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     private var graphStore: GraphStore { viewModel.graphStore }
 
     enum MainTab: String, CaseIterable, Identifiable {
@@ -56,12 +58,7 @@ struct MainWindowView: View {
 
                 Spacer(minLength: 0)
 
-                if selectedTab == .routing {
-                    graphRunButton
-                } else {
-                    Color.clear
-                        .frame(width: 100, height: 1)
-                }
+                bottomTrailingControls
             }
             .padding(.horizontal, 24)
             .padding(.bottom, 16)
@@ -73,6 +70,9 @@ struct MainWindowView: View {
         .toolbarTitleDisplayMode(.inline)
         .toolbar { toolbarContent }
         .onAppear { viewModel.refreshAudioProcesses() }
+        .onReceive(comfortTimer) { _ in
+            viewModel.updateListeningComfort(elapsed: 1)
+        }
     }
 
     private var isGraphRunning: Bool {
@@ -99,6 +99,83 @@ struct MainWindowView: View {
         }
         .buttonStyle(TactileButtonStyle(pressedScale: 0.95))
         .help(isGraphRunning ? "Stop Routing (⌘↩)" : "Run Routing (⌘↩)")
+    }
+
+    private var bottomTrailingControls: some View {
+        HStack(spacing: 10) {
+            if selectedTab == .routing {
+                graphRunButton
+            }
+
+            eqStatusControl
+        }
+        .frame(minWidth: 174, alignment: .trailing)
+    }
+
+    private var eqStatusControl: some View {
+        HStack(spacing: 2) {
+            eqStatusSegment(
+                title: "ACTIVE",
+                icon: "checkmark.circle.fill",
+                isSelected: viewModel.isEnabled,
+                color: OpenEQTheme.accentGreen,
+                action: { viewModel.setEnabled(true) }
+            )
+
+            eqStatusSegment(
+                title: "BYPASS",
+                icon: "circle.slash",
+                isSelected: !viewModel.isEnabled,
+                color: OpenEQTheme.accentAmber,
+                action: { viewModel.setEnabled(false) }
+            )
+        }
+        .padding(3)
+        .background(.ultraThinMaterial, in: Capsule())
+        .overlay {
+            Capsule()
+                .stroke(Color.white.opacity(0.16), lineWidth: 0.8)
+        }
+        .shadow(color: Color.black.opacity(0.24), radius: 10, y: 4)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Equalizer state")
+    }
+
+    private func eqStatusSegment(
+        title: String,
+        icon: String,
+        isSelected: Bool,
+        color: Color,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button {
+            withAnimation(.spring(response: 0.22, dampingFraction: 0.72)) {
+                action()
+            }
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: icon)
+                    .font(.system(size: 10, weight: .bold))
+                Text(title)
+                    .font(.system(size: 10, weight: isSelected ? .bold : .medium, design: .monospaced))
+            }
+            .foregroundStyle(isSelected ? color : .secondary)
+            .frame(width: 72, height: 26)
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .background {
+            if isSelected {
+                Capsule()
+                    .fill(color.opacity(0.18))
+                    .overlay {
+                        Capsule()
+                            .stroke(color.opacity(0.38), lineWidth: 0.8)
+                    }
+            }
+        }
+        .accessibilityLabel(title == "ACTIVE" ? "Equalizer active" : "Equalizer bypassed")
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
     private var routingInspectorPanel: some View {
@@ -185,6 +262,7 @@ struct MainWindowView: View {
     private var equalizerPage: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
+                ListeningComfortView(viewModel: viewModel)
                 EqualizerView(viewModel: viewModel)
                 SpectrumView(
                     title: viewModel.spectrumTitle,
@@ -317,20 +395,6 @@ struct MainWindowView: View {
             }
         }
         ToolbarItemGroup(placement: .primaryAction) {
-            Button {
-                viewModel.setEnabled(!viewModel.isEnabled)
-            } label: {
-                HStack(spacing: 6) {
-                    StudioLED(isOn: viewModel.isEnabled, activeColor: OpenEQTheme.accentGreen, inactiveColor: OpenEQTheme.accentAmber, size: 7)
-                    Text(viewModel.isEnabled ? "EQ ACTIVE" : "BYPASSED")
-                        .font(.system(size: 11, weight: .bold, design: .monospaced))
-                }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-            }
-            .buttonStyle(TactileButtonStyle())
-            .help(viewModel.isEnabled ? "Bypass EQ (⌘B)" : "Enable EQ (⌘B)")
-
             Button {
                 viewModel.resetEQ()
             } label: {

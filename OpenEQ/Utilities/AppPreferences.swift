@@ -8,6 +8,8 @@ enum AppPreferences {
         static let preferSystemEQOnLaunch = "openeq.preferSystemEQOnLaunch"
         static let autoApplyDeviceProfiles = "openeq.autoApplyDeviceProfiles"
         static let feedbackProtectionEnabled = "openeq.feedbackProtectionEnabled"
+        static let listeningComfortEnabled = "openeq.listeningComfortEnabled"
+        static let listeningComfortAutoSootheEnabled = "openeq.listeningComfortAutoSootheEnabled"
     }
 
     static var hasCompletedSystemEQOnboarding: Bool {
@@ -38,5 +40,20 @@ enum AppPreferences {
             return defaults.bool(forKey: Key.feedbackProtectionEnabled)
         }
         set { defaults.set(newValue, forKey: Key.feedbackProtectionEnabled) }
+    }
+
+    static var listeningComfortEnabled: Bool {
+        get {
+            if defaults.object(forKey: Key.listeningComfortEnabled) == nil {
+                return true
+            }
+            return defaults.bool(forKey: Key.listeningComfortEnabled)
+        }
+        set { defaults.set(newValue, forKey: Key.listeningComfortEnabled) }
+    }
+
+    static var listeningComfortAutoSootheEnabled: Bool {
+        get { defaults.bool(forKey: Key.listeningComfortAutoSootheEnabled) }
+        set { defaults.set(newValue, forKey: Key.listeningComfortAutoSootheEnabled) }
     }
 }

@@ -27,6 +27,8 @@ gantt
     section Phase 4: Pro Features & Mobile
     AutoEQ Integration (4000+ Headphones):p4_1, 2027-03, 2M
     iOS/iPadOS and visionOS Ports        :p4_2, 2027-04, 3M
+    section Phase 5: Comfort Intelligence
+    Privacy-first Comfort Guard          :done, p5_1, 2026-08, 1w
 ```
 
 ---
@@ -148,6 +150,15 @@ gantt
 *   Strategy documented in `docs/platform.md`.
 *   No iOS/visionOS app target in this release — avoid overclaiming.
 
+## ✅ PHASE 5: Comfort Intelligence
+
+**Status:** First vertical slice shipped.
+
+*   Comfort Guard tracks a relative listening-load signal from live peak and high-frequency FFT energy.
+*   It works across local playback, System-Wide EQ, and External Loopback while the main window is open.
+*   Gentle relief is user-triggered by default; Auto-soothe adds a five-minute cooldown between adjustments.
+*   The feature is local-only and does not claim calibrated SPL, hearing diagnosis, or medical protection.
+
 ---
 
 ## 📈 Release Matrix
@@ -160,3 +171,4 @@ gantt
 | **Latency** | ~buffer-dependent (shown in UI) | Lower with virtual driver | Near zero (&lt; 2.5ms goal) |
 | **OS Compatibility** | macOS 14.0+ (local), 14.2+ (system EQ) | macOS 14.2+ | macOS, iPadOS, visionOS |
 | **Safety** | Unified bypass, peak limiter, safe mode | Feedback / howling guard | — |
+| **Comfort Guard** | Relative load monitor + break guidance | Reversible gentle relief | Personal calibration model |

@@ -161,6 +161,19 @@ final class OpenEQViewModel {
     var audioProcesses: [AudioProcessInfo] = []
     var showGraphInspector = false
     var graphRuntimeLabel: String?
+    var listeningComfortState = ListeningComfortState.idle
+    var isListeningComfortEnabled: Bool = AppPreferences.listeningComfortEnabled {
+        didSet {
+            AppPreferences.listeningComfortEnabled = isListeningComfortEnabled
+            if !isListeningComfortEnabled {
+                listeningComfortEngine.reset()
+                listeningComfortState = .idle
+            }
+        }
+    }
+    var isListeningComfortAutoSootheEnabled: Bool = AppPreferences.listeningComfortAutoSootheEnabled {
+        didSet { AppPreferences.listeningComfortAutoSootheEnabled = isListeningComfortAutoSootheEnabled }
+    }
     /// Set while a graph chain is actively driven by Run Graph.
     var runningGraphNodeIDsOverride: Set<UUID> = []
     private var graphRerunTask: Task<Void, Never>?
@@ -205,9 +218,11 @@ final class OpenEQViewModel {
     let deviceProfileStore = DeviceProfileStore()
     private let auPluginHost = AUv3PluginHost()
     private let autoEQCatalog = AutoEQCatalog()
+    private let listeningComfortEngine = ListeningComfortEngine()
     let processEnumerator = AudioProcessEnumerator()
     private var graphicBands: [EQBand]
     private var parametricBands: [EQBand]
+    private var listeningComfortAutoSootheCooldown: TimeInterval = 0
     var isApplyingDeviceProfile = false
     var isApplyingGraphEQ = false
 
@@ -887,6 +902,56 @@ final class OpenEQViewModel {
 
         systemAudioManager.updateSystemAudioEQ(currentActivePreset())
         syncSystemAudioState()
+    }
+
+    func updateListeningComfort(elapsed: TimeInterval) {
+        guard isListeningComfortEnabled else { return }
+        listeningComfortAutoSootheCooldown = max(0, listeningComfortAutoSootheCooldown - elapsed)
+
+        let isActive = !isMuted && isEnabled && (
+            isSystemEQActive || isExternalLoopbackActive ||
+            (selectedFileURL != nil && playbackState == .playing)
+        )
+        listeningComfortState = listeningComfortEngine.update(
+            peakLevel: peakLevel,
+            spectrumLevels: spectrumLevels,
+            isActive: isActive,
+            elapsed: elapsed
+        )
+
+        if isListeningComfortAutoSootheEnabled,
+           listeningComfortState.status == .takeBreak,
+           listeningComfortState.suggestedReliefDB > 0.2,
+           listeningComfortAutoSootheCooldown == 0 {
+            applyListeningComfortRelief()
+            listeningComfortAutoSootheCooldown = 300
+        }
+    }
+
+    func resetListeningComfort() {
+        listeningComfortEngine.reset()
+        listeningComfortState = .idle
+    }
+
+    func applyListeningComfortRelief() {
+        let relief = listeningComfortState.suggestedReliefDB
+        guard relief > 0.1 else { return }
+
+        let adjustedBands = bands.map { band in
+            var adjusted = band
+            let highFrequencyWeight = max(0, min(1, log2(max(band.frequency, 20) / 2000) / 3))
+            adjusted.gain -= relief * highFrequencyWeight
+            return adjusted
+        }
+        let adjustedPreamp = max(EQBand.gainRange.lowerBound, preamp - min(1.5, relief * 0.5))
+        let preset = EQPreset(
+            name: "Comfort Guard",
+            mode: eqMode,
+            bands: adjustedBands,
+            preamp: adjustedPreamp
+        )
+        applyPreset(preset)
+        calibrationImportMessage = String(format: "Comfort Guard applied −%.1f dB of gentle relief.", relief)
     }
 
     /// Single DSP policy for every engine: same bands, mode, and preamp.

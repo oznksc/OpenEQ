@@ -75,6 +75,46 @@ final class OpenEQTests: XCTestCase {
         XCTAssertEqual(thirtyOneBand.last, 20000)
     }
 
+    func testListeningComfortEngineStartsIdle() {
+        let engine = ListeningComfortEngine()
+
+        XCTAssertEqual(engine.state, .idle)
+        XCTAssertEqual(engine.state.score, 100)
+        XCTAssertEqual(engine.state.status, .comfortable)
+    }
+
+    func testListeningComfortEngineRespondsToSustainedLoudHarshAudio() {
+        let engine = ListeningComfortEngine()
+        let harshSpectrum = Array(repeating: Float(0.95), count: SpectrumAnalyzer.barCount)
+
+        for _ in 0..<4_000 {
+            _ = engine.update(
+                peakLevel: 0.95,
+                spectrumLevels: harshSpectrum,
+                isActive: true,
+                elapsed: 1
+            )
+        }
+
+        XCTAssertLessThan(engine.state.score, 72)
+        XCTAssertGreaterThan(engine.state.exposurePercent, 0.45)
+        XCTAssertEqual(engine.state.status, .takeBreak)
+        XCTAssertGreaterThan(engine.state.suggestedReliefDB, 0.2)
+    }
+
+    func testListeningComfortEngineRecoversWhileInactive() {
+        let engine = ListeningComfortEngine()
+        let spectrum = Array(repeating: Float(0.8), count: SpectrumAnalyzer.barCount)
+
+        _ = engine.update(peakLevel: 0.9, spectrumLevels: spectrum, isActive: true, elapsed: 5)
+        let activePressure = engine.state.loudnessPressure
+        _ = engine.update(peakLevel: 0, spectrumLevels: [], isActive: false, elapsed: 5)
+
+        XCTAssertGreaterThan(activePressure, 0.9)
+        XCTAssertLessThan(engine.state.score, 100)
+        XCTAssertEqual(engine.state.isActive, false)
+    }
+
     func testEQBandDefaultBandsForMode() {
         let graphic = EQBand.defaultBands(for: .graphic, graphicBandCount: .ten)
         XCTAssertEqual(graphic.count, 10)
