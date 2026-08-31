@@ -27,11 +27,15 @@ struct MainWindowView: View {
                 }
             }
 
-            PlayerControlsView(viewModel: viewModel)
-                .frame(maxWidth: 780)
-                .padding(.horizontal, 24)
-                .padding(.bottom, 16)
+            if selectedTab != .routing {
+                PlayerControlsView(viewModel: viewModel)
+                    .frame(maxWidth: 780)
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 16)
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+            }
         }
+        .animation(.easeInOut(duration: 0.2), value: selectedTab)
         .frame(width: OpenEQTheme.minWindowWidth, height: OpenEQTheme.minWindowHeight)
         .toolbarTitleDisplayMode(.inline)
         .toolbar { toolbarContent }
@@ -56,12 +60,10 @@ struct MainWindowView: View {
             .frame(maxWidth: 1100, alignment: .leading)
             .frame(maxWidth: .infinity)
         }
-        .navigationTitle("Equalizer")
     }
 
     private var routingPage: some View {
         GraphWorkspaceView(viewModel: viewModel, store: graphStore)
-            .navigationTitle("Routing")
             .inspector(isPresented: $viewModel.showGraphInspector) {
                 NodeInspectorView(store: graphStore, viewModel: viewModel)
                     .inspectorColumnWidth(min: 300, ideal: 320, max: 380)
@@ -109,7 +111,6 @@ struct MainWindowView: View {
             .frame(maxWidth: 780, alignment: .leading)
             .frame(maxWidth: .infinity)
         }
-        .navigationTitle("Library")
     }
 
     private func rackModule<Content: View>(_ title: String, icon: String? = nil, @ViewBuilder content: () -> Content) -> some View {
@@ -135,7 +136,7 @@ struct MainWindowView: View {
     }
 
     @ToolbarContentBuilder private var toolbarContent: some ToolbarContent {
-        ToolbarItem(placement: .principal) {
+        ToolbarItem(placement: .navigation) {
             HStack(spacing: 2) {
                 ForEach(MainTab.allCases) { tab in
                     Button {
