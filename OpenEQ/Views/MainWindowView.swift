@@ -28,8 +28,9 @@ struct MainWindowView: View {
                 }
             }
 
-            HStack(alignment: .center, spacing: 16) {
-                brandLogoBadge
+            if selectedTab != .routing {
+                HStack(alignment: .center, spacing: 16) {
+                    brandLogoBadge
 
                 Spacer(minLength: 0)
 
@@ -43,9 +44,10 @@ struct MainWindowView: View {
 
                 Color.clear
                     .frame(width: 100, height: 1)
+                }
+                .padding(.horizontal, 24)
+                .padding(.bottom, 16)
             }
-            .padding(.horizontal, 24)
-            .padding(.bottom, 16)
         }
         .animation(.easeInOut(duration: 0.2), value: selectedTab)
         .frame(width: OpenEQTheme.minWindowWidth, height: OpenEQTheme.minWindowHeight)
@@ -95,10 +97,30 @@ struct MainWindowView: View {
             .frame(maxWidth: 1100, alignment: .leading)
             .frame(maxWidth: .infinity)
         }
+        .scrollContentBackground(.hidden)
+        .background(OpenEQTheme.chassisBg)
     }
 
     private var routingPage: some View {
-        GraphWorkspaceView(viewModel: viewModel, store: graphStore)
+        HStack(spacing: 0) {
+            GraphPaletteView(
+                store: graphStore,
+                processes: viewModel.audioProcesses,
+                inputDevices: viewModel.availableInputDevices,
+                outputDevices: viewModel.availableOutputDevices,
+                onOpenFile: { viewModel.openAudioFile() }
+            )
+            .frame(width: 220)
+            .background(.bar)
+            .overlay(alignment: .trailing) {
+                Divider()
+            }
+
+            GraphWorkspaceView(viewModel: viewModel, store: graphStore)
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            routingHintBar
+        }
             .inspector(isPresented: $viewModel.showGraphInspector) {
                 NodeInspectorView(store: graphStore, viewModel: viewModel)
                     .inspectorColumnWidth(min: 300, ideal: 320, max: 380)
@@ -113,6 +135,24 @@ struct MainWindowView: View {
                     .help("Inspector")
                 }
             }
+    }
+
+    private var routingHintBar: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "info.circle")
+                .foregroundStyle(OpenEQTheme.accentCyan)
+            Text("Drag nodes to move · drag from an output port to connect")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Text("⌘ Delete to remove")
+                .font(.caption.monospaced())
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 7)
+        .background(.bar)
+        .overlay(alignment: .top) { Divider() }
     }
 
     private var libraryPage: some View {
@@ -146,6 +186,8 @@ struct MainWindowView: View {
             .frame(maxWidth: 780, alignment: .leading)
             .frame(maxWidth: .infinity)
         }
+        .scrollContentBackground(.hidden)
+        .background(OpenEQTheme.chassisBg)
     }
 
     private func rackModule<Content: View>(_ title: String, icon: String? = nil, @ViewBuilder content: () -> Content) -> some View {
@@ -249,4 +291,3 @@ struct MainWindowView: View {
 }
 
 #Preview { MainWindowView(viewModel: OpenEQViewModel(audioEngineController: AudioEngineController())).frame(width: 1280, height: 800) }
-

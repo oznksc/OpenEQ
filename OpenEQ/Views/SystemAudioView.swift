@@ -56,6 +56,8 @@ struct SystemAudioView: View {
                 }
             }
             .formStyle(.grouped)
+            .scrollContentBackground(.hidden)
+            .background(OpenEQTheme.chassisBg)
             .navigationTitle("System Audio")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

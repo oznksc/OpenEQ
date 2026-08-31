@@ -34,49 +34,53 @@ struct GraphCanvasView: View {
 
     var body: some View {
         GeometryReader { geo in
-            // Document space lives inside the scaled/offset container.
             ZStack(alignment: .topLeading) {
-                GraphGridBackground()
+                OpenEQTheme.chassisBg
+                    .ignoresSafeArea()
+
+                // Document space lives inside the scaled/offset container.
+                ZStack(alignment: .topLeading) {
+                    GraphGridBackground(size: geo.size)
+                        .contentShape(Rectangle())
+                        .gesture(backgroundPanGesture)
+                        .onTapGesture {
+                            store.clearSelection()
+                            isCanvasFocused = true
+                        }
+
+                    GraphEdgeLayer(
+                        document: store.document,
+                        selectedEdgeIDs: store.selectedEdgeIDs,
+                        draftFrom: wireDrag?.fromPoint,
+                        draftTo: wireDrag?.currentPoint,
+                        livePositions: livePositions,
+                        store: store
+                    )
                     .frame(width: geo.size.width, height: geo.size.height)
-                    .contentShape(Rectangle())
-                    .gesture(backgroundPanGesture)
-                    .onTapGesture {
-                        store.clearSelection()
-                        isCanvasFocused = true
+                    .allowsHitTesting(false)
+
+                    ForEach(store.document.nodes) { node in
+                        nodeLayer(node)
                     }
 
-                GraphEdgeLayer(
-                    document: store.document,
-                    selectedEdgeIDs: store.selectedEdgeIDs,
-                    draftFrom: wireDrag?.fromPoint,
-                    draftTo: wireDrag?.currentPoint,
-                    livePositions: livePositions,
-                    store: store
-                )
-                .frame(width: geo.size.width, height: geo.size.height)
-                .allowsHitTesting(false)
-
-                ForEach(store.document.nodes) { node in
-                    nodeLayer(node)
-                }
-
-                if store.document.nodes.isEmpty {
-                    ContentUnavailableView {
-                        Label("Empty Graph", systemImage: "point.3.connected.trianglepath.dotted")
-                    } description: {
-                        Text("Add sources from the sidebar.")
-                    } actions: {
-                        Button("Starter") { store.resetToStarter() }
-                            .buttonStyle(.borderedProminent)
-                            .controlSize(.small)
+                    if store.document.nodes.isEmpty {
+                        ContentUnavailableView {
+                            Label("Empty Graph", systemImage: "point.3.connected.trianglepath.dotted")
+                        } description: {
+                            Text("Add sources from the sidebar.")
+                        } actions: {
+                            Button("Starter") { store.resetToStarter() }
+                                .buttonStyle(.borderedProminent)
+                                .controlSize(.small)
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
+                .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
+                .coordinateSpace(name: GraphCanvasSpace.document)
+                .scaleEffect(store.canvasScale, anchor: .topLeading)
+                .offset(store.canvasOffset)
             }
-            .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
-            .coordinateSpace(name: GraphCanvasSpace.document)
-            .scaleEffect(store.canvasScale, anchor: .topLeading)
-            .offset(store.canvasOffset)
             .contentShape(Rectangle())
             .gesture(canvasMagnifyGesture)
             .onTapGesture(count: 2) { location in
@@ -122,6 +126,9 @@ struct GraphCanvasView: View {
                 return .handled
             }
             .onAppear { magnifyBase = store.canvasScale }
+            .transaction { transaction in
+                transaction.animation = nil
+            }
         }
         .clipped()
     }
@@ -325,8 +332,10 @@ private enum GraphCanvasSpace {
 }
 
 private struct GraphGridBackground: View {
+    let size: CGSize
+
     var body: some View {
-        Canvas { context, size in
+        Canvas { context, _ in
             let spacing = GraphTheme.gridSpacing
             let cols = Int(size.width / spacing) + 2
             let rows = Int(size.height / spacing) + 2
@@ -343,7 +352,6 @@ private struct GraphGridBackground: View {
             }
             context.fill(path, with: .color(.primary.opacity(0.07)))
         }
-        .background(Color(nsColor: .windowBackgroundColor))
-        .drawingGroup(opaque: true)
+        .background(OpenEQTheme.chassisBg)
     }
 }

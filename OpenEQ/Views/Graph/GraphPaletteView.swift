@@ -16,9 +16,7 @@ struct GraphPaletteView: View {
                 paletteButton(kind: .fileSource) {
                     onOpenFile?()
                     let id = store.addNode(kind: .fileSource, at: spawnPoint())
-                    if let name = store.document.node(id: id) {
-                        _ = name
-                    }
+                    store.selectNode(id)
                 }
             } header: {
                 OpenEQSectionTitle(title: "Sources")
@@ -89,6 +87,7 @@ struct GraphPaletteView: View {
             }
         }
         .listStyle(.sidebar)
+        .scrollContentBackground(.hidden)
     }
 
     private func paletteButton(kind: GraphNodeKind, action: (() -> Void)? = nil) -> some View {
