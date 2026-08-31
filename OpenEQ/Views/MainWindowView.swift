@@ -424,11 +424,13 @@ struct MainWindowView: View {
             Button {
                 viewModel.resetEQ()
             } label: {
-                Image(systemName: "arrow.counterclockwise")
+                Label("Reset EQ", systemImage: "arrow.counterclockwise")
                     .font(.system(size: 12, weight: .semibold))
+                    .labelStyle(.titleAndIcon)
+                    .padding(.horizontal, 6)
             }
             .buttonStyle(TactileButtonStyle())
-            .help("Reset EQ")
+            .help("Reset EQ to a flat response")
         }
     }
 }

@@ -7,6 +7,7 @@ struct PlayerControlsView: View {
 
     @State private var currentTime: Double = 0.0
     @State private var isDraggingScrubber = false
+    @State private var isShowingVolumePopover = false
     private let timer = Timer.publish(every: 0.125, on: .main, in: .common).autoconnect()
 
     var body: some View {
@@ -17,22 +18,29 @@ struct PlayerControlsView: View {
                 errorBanner(error)
             }
 
-            let controlRow = HStack(spacing: 16) {
-                fileInfo
-                transport
-                progress(duration: duration)
-                volume
-            }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 12)
+            if shouldShowCompactControls {
+                compactControls
+                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
+            } else {
+                let controlRow = HStack(spacing: 16) {
+                    fileInfo
+                    transport
+                    progress(duration: duration)
+                    volume
+                }
+                .padding(.horizontal, 18)
+                .padding(.vertical, 12)
 
-            controlRow
-                .background(OpenEQTheme.cardBgElevated, in: Capsule())
-                .overlay(
-                    Capsule()
-                        .stroke(Color.white.opacity(0.12), lineWidth: 1)
-                )
+                controlRow
+                    .background(OpenEQTheme.cardBgElevated, in: Capsule())
+                    .overlay(
+                        Capsule()
+                            .stroke(Color.white.opacity(0.12), lineWidth: 1)
+                    )
+                    .transition(.opacity.combined(with: .scale(scale: 0.98)))
+            }
         }
+        .animation(.easeInOut(duration: 0.2), value: shouldShowCompactControls)
         .onReceive(timer) { _ in
             guard !isDraggingScrubber else { return }
             switch viewModel.playbackState {
@@ -42,6 +50,128 @@ struct PlayerControlsView: View {
                 currentTime = 0
             }
         }
+    }
+
+    private var shouldShowCompactControls: Bool {
+        viewModel.selectedFileURL == nil
+            && viewModel.playbackState == .idle
+            && viewModel.errorMessage == nil
+    }
+
+    private var compactControls: some View {
+        HStack(spacing: 8) {
+            compactOpenFileButton
+            compactStopButton
+            compactPlayButton
+            compactVolumeButton
+        }
+        .padding(6)
+        .background(.ultraThinMaterial, in: Capsule())
+        .overlay {
+            Capsule()
+                .stroke(Color.white.opacity(0.14), lineWidth: 0.8)
+        }
+        .shadow(color: Color.black.opacity(0.22), radius: 8, y: 3)
+    }
+
+    private var compactOpenFileButton: some View {
+        Button {
+            viewModel.openAudioFile()
+        } label: {
+            Image(systemName: "folder.fill")
+                .font(.system(size: 11, weight: .semibold))
+                .frame(width: 28, height: 28)
+                .background(Color.white.opacity(0.07), in: Circle())
+        }
+        .buttonStyle(TactileButtonStyle())
+        .help("Open Audio (⌘O)")
+        .accessibilityLabel("Open audio file")
+    }
+
+    private var compactStopButton: some View {
+        Button {
+            viewModel.stop()
+            currentTime = 0
+        } label: {
+            Image(systemName: "stop.fill")
+                .font(.system(size: 10, weight: .bold))
+                .frame(width: 28, height: 28)
+                .background(Color.white.opacity(0.07), in: Circle())
+        }
+        .buttonStyle(TactileButtonStyle())
+        .disabled(true)
+        .opacity(0.38)
+        .help("Stop")
+        .accessibilityLabel("Stop")
+    }
+
+    private var compactPlayButton: some View {
+        Button {
+            if viewModel.playbackState == .playing {
+                viewModel.pause()
+            } else {
+                viewModel.play()
+            }
+        } label: {
+            Image(systemName: "play.fill")
+                .font(.system(size: 11, weight: .bold))
+                .frame(width: 30, height: 30)
+                .background(Color.white.opacity(0.12), in: Circle())
+        }
+        .buttonStyle(TactileButtonStyle(pressedScale: 0.94))
+        .disabled(true)
+        .opacity(0.38)
+        .help("Select an audio file to play")
+        .accessibilityLabel("Play")
+    }
+
+    private var compactVolumeButton: some View {
+        Button {
+            isShowingVolumePopover.toggle()
+        } label: {
+            Image(systemName: volumeIcon)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(viewModel.isMuted ? OpenEQTheme.accentRed : .primary)
+                .frame(width: 28, height: 28)
+                .background(Color.white.opacity(0.07), in: Circle())
+        }
+        .buttonStyle(TactileButtonStyle())
+        .popover(isPresented: $isShowingVolumePopover, arrowEdge: .bottom) {
+            volumePopover
+        }
+        .help("Volume controls")
+        .accessibilityLabel("Volume controls")
+    }
+
+    private var volumePopover: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: volumeIcon)
+                    .foregroundStyle(viewModel.isMuted ? OpenEQTheme.accentRed : .primary)
+                Text("Volume")
+                    .font(.system(size: 12, weight: .semibold))
+                Spacer()
+                Text("\(Int((viewModel.isMuted ? 0 : viewModel.volume) * 100))%")
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+
+            Slider(
+                value: Binding(
+                    get: { viewModel.isMuted ? 0 : viewModel.volume },
+                    set: {
+                        viewModel.volume = $0
+                        if viewModel.isMuted { viewModel.isMuted = false }
+                    }
+                ),
+                in: 0...(viewModel.isVolumeBoostEnabled ? 2 : 1)
+            )
+
+            Toggle("Volume boost", isOn: $viewModel.isVolumeBoostEnabled)
+                .controlSize(.small)
+        }
+        .padding(12)
+        .frame(width: 190)
     }
 
     private var fileInfo: some View {
@@ -264,4 +394,3 @@ struct PlayerControlsView: View {
     .padding()
     .frame(width: 1000)
 }
-
