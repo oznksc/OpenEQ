@@ -42,6 +42,7 @@ final class AudioEngineController {
     private var playbackGeneration: UInt64 = 0
     private var dynamics = DynamicsSettings.default
     private var stereoBalance: Float = 0
+    private var analysisFramesSinceLast = 0
 
     init() {
         let compressorDesc = AudioComponentDescription(
@@ -620,6 +621,12 @@ final class AudioEngineController {
         engine.mainMixerNode.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
             guard let self = self else { return }
 
+            self.analysisFramesSinceLast += Int(buffer.frameLength)
+            guard self.analysisFramesSinceLast >= max(1024, Int(format.sampleRate / 20)) else {
+                return
+            }
+            self.analysisFramesSinceLast = 0
+
             guard let analysis = self.analyzer.analyze(buffer: buffer) else {
                 return
             }
@@ -650,6 +657,7 @@ final class AudioEngineController {
     }
 
     private func resetAnalysisState(dispatchToMain: Bool = true) {
+        analysisFramesSinceLast = 0
         let analysis = analyzer.reset()
 
         let update = {
