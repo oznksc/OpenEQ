@@ -55,7 +55,7 @@ final class AUv3PluginHost {
             with: descriptor.audioComponentDescription,
             options: []
         ) { [weak self] unit, error in
-            Task { @MainActor in
+            Task { @MainActor [weak self] in
                 guard let self else { return }
                 if let error {
                     self.lastError = error.localizedDescription

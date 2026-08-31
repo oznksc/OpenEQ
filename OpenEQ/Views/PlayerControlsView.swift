@@ -16,7 +16,7 @@ struct PlayerControlsView: View {
                 errorBanner(error)
             }
 
-            HStack(spacing: 20) {
+            let controlRow = HStack(spacing: 20) {
                 fileInfo
                 transport
                 progress(duration: duration)
@@ -24,10 +24,18 @@ struct PlayerControlsView: View {
             }
             .padding(.horizontal, 18)
             .padding(.vertical, 14)
-            .glassEffect(
-                .regular.interactive(),
-                in: RoundedRectangle(cornerRadius: OpenEQTheme.playerBarCornerRadius, style: .continuous)
-            )
+
+            if #available(macOS 26.0, *) {
+                controlRow.glassEffect(
+                    .regular.interactive(),
+                    in: RoundedRectangle(cornerRadius: OpenEQTheme.playerBarCornerRadius, style: .continuous)
+                )
+            } else {
+                controlRow.background(
+                    .thinMaterial,
+                    in: RoundedRectangle(cornerRadius: OpenEQTheme.playerBarCornerRadius, style: .continuous)
+                )
+            }
         }
         .onReceive(timer) { _ in
             switch viewModel.playbackState {

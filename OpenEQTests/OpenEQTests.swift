@@ -198,6 +198,18 @@ final class OpenEQTests: XCTestCase {
         XCTAssertFalse(analysis.isClipping)
     }
 
+    func testSpectrumLevelsHaveFixedWidthValueSemantics() {
+        var levels = SpectrumLevels(repeating: 0.25)
+
+        XCTAssertEqual(levels.count, SpectrumAnalyzer.barCount)
+        XCTAssertTrue(levels.allSatisfy { $0 == 0.25 })
+
+        levels[3] = 0.9
+
+        XCTAssertEqual(levels[3], 0.9, accuracy: 0.001)
+        XCTAssertEqual(levels[2], 0.25, accuracy: 0.001)
+    }
+
     func testSpectrumAnalyzerProcessesSineWave() {
         let analyzer = SpectrumAnalyzer()
         let sampleRate: Double = 44100
@@ -414,6 +426,24 @@ final class OpenEQTests: XCTestCase {
         let limiter = AVAudioUnitEffect(audioComponentDescription: limiterDescription)
         PeakLimiterConfigurator.applyDefaults(to: limiter)
         XCTAssertFalse(limiter.bypass)
+    }
+
+    func testSystemAudioLimiterRemainsActiveWhenEQIsBypassed() {
+        let dsp = SystemAudioDSPState()
+        dsp.isBypassed = true
+
+        let frameCount = 32
+        let samples = UnsafeMutablePointer<Float>.allocate(capacity: frameCount)
+        samples.initialize(repeating: 1, count: frameCount)
+        defer {
+            samples.deinitialize(count: frameCount)
+            samples.deallocate()
+        }
+
+        dsp.process(samples, frames: frameCount, channel: 0)
+
+        XCTAssertLessThan(samples[0], 1)
+        XCTAssertGreaterThan(samples[0], 0)
     }
 
     // MARK: - Phase 2
