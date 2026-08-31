@@ -8,86 +8,104 @@ struct GraphPaletteView: View {
     var onOpenFile: (() -> Void)?
 
     var body: some View {
-        List {
-            Section {
-                paletteButton(kind: .systemSource)
-                paletteButton(kind: .appSource)
-                paletteButton(kind: .inputSource)
-                paletteButton(kind: .fileSource) {
-                    onOpenFile?()
-                    let id = store.addNode(kind: .fileSource, at: spawnPoint())
-                    store.selectNode(id)
-                }
-            } header: {
-                OpenEQSectionTitle(title: "Sources")
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Image(systemName: "plus.circle.fill")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(OpenEQTheme.accentCyan)
+                Text("NODE PALETTE")
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .tracking(0.8)
+                    .foregroundStyle(.secondary)
+                Spacer()
             }
+            .padding(.horizontal, 14)
+            .padding(.top, 12)
+            .padding(.bottom, 6)
 
-            Section {
-                paletteButton(kind: .equalizer)
-                paletteButton(kind: .dynamics)
-            } header: {
-                OpenEQSectionTitle(title: "Processors")
-            }
+            Divider().opacity(0.12)
 
-            Section {
-                paletteButton(kind: .output)
-                paletteButton(kind: .monitor)
-            } header: {
-                OpenEQSectionTitle(title: "Outputs")
-            }
-
-            if !processes.isEmpty {
+            List {
                 Section {
-                    ForEach(processes.prefix(12)) { process in
-                        Button {
-                            let id = store.addNode(
-                                kind: .appSource,
-                                at: spawnPoint(),
-                                title: process.name,
-                                config: .appSource(
-                                    .init(
-                                        bundleID: process.bundleID,
-                                        processObjectID: process.objectID,
-                                        displayName: process.name,
-                                        pid: process.pid
-                                    )
-                                )
-                            )
-                            store.selectNode(id)
-                        } label: {
-                            HStack(spacing: 8) {
-                                if let icon = process.icon {
-                                    Image(nsImage: icon)
-                                        .resizable()
-                                        .frame(width: 16, height: 16)
-                                } else {
-                                    Image(systemName: "app")
-                                        .frame(width: 16)
-                                }
-                                Text(process.name)
-                                    .lineLimit(1)
-                                Spacer()
-                                if process.isRunningOutput {
-                                    Circle().fill(.green).frame(width: 6, height: 6)
-                                }
-                            }
-                        }
-                        .buttonStyle(.plain)
+                    paletteButton(kind: .systemSource)
+                    paletteButton(kind: .appSource)
+                    paletteButton(kind: .inputSource)
+                    paletteButton(kind: .fileSource) {
+                        onOpenFile?()
+                        let id = store.addNode(kind: .fileSource, at: spawnPoint())
+                        store.selectNode(id)
                     }
                 } header: {
-                    OpenEQSectionTitle(title: "Live Apps")
+                    OpenEQSectionTitle(title: "Sources")
                 }
-            }
 
-            Section {
-                Button("Reset Graph") {
-                    store.resetToStarter()
+                Section {
+                    paletteButton(kind: .equalizer)
+                    paletteButton(kind: .dynamics)
+                } header: {
+                    OpenEQSectionTitle(title: "Processors")
                 }
-                .foregroundStyle(.secondary)
+
+                Section {
+                    paletteButton(kind: .output)
+                    paletteButton(kind: .monitor)
+                } header: {
+                    OpenEQSectionTitle(title: "Outputs")
+                }
+
+                if !processes.isEmpty {
+                    Section {
+                        ForEach(processes.prefix(12)) { process in
+                            Button {
+                                let id = store.addNode(
+                                    kind: .appSource,
+                                    at: spawnPoint(),
+                                    title: process.name,
+                                    config: .appSource(
+                                        .init(
+                                            bundleID: process.bundleID,
+                                            processObjectID: process.objectID,
+                                            displayName: process.name,
+                                            pid: process.pid
+                                        )
+                                    )
+                                )
+                                store.selectNode(id)
+                            } label: {
+                                HStack(spacing: 8) {
+                                    if let icon = process.icon {
+                                        Image(nsImage: icon)
+                                            .resizable()
+                                            .frame(width: 16, height: 16)
+                                    } else {
+                                        Image(systemName: "app")
+                                            .frame(width: 16)
+                                    }
+                                    Text(process.name)
+                                        .lineLimit(1)
+                                    Spacer()
+                                    if process.isRunningOutput {
+                                        Circle().fill(.green).frame(width: 6, height: 6)
+                                    }
+                                }
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    } header: {
+                        OpenEQSectionTitle(title: "Live Apps")
+                    }
+                }
+
+                Section {
+                    Button("Reset Graph") {
+                        store.resetToStarter()
+                    }
+                    .foregroundStyle(.secondary)
+                }
             }
+            .listStyle(.sidebar)
+            .scrollContentBackground(.hidden)
         }
-        .listStyle(.sidebar)
-        .scrollContentBackground(.hidden)
     }
 
     private func paletteButton(kind: GraphNodeKind, action: (() -> Void)? = nil) -> some View {

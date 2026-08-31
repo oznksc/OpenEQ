@@ -5,6 +5,7 @@ struct MainWindowView: View {
     @Bindable var viewModel: OpenEQViewModel
     @State private var selectedTab: MainTab = .equalizer
     @State private var hoveredTab: MainTab?
+    @State private var isShowingNodePalette = false
     private var graphStore: GraphStore { viewModel.graphStore }
 
     enum MainTab: String, CaseIterable, Identifiable {
@@ -28,9 +29,12 @@ struct MainWindowView: View {
                 }
             }
 
-            if selectedTab != .routing {
-                HStack(alignment: .center, spacing: 16) {
-                    brandLogoBadge
+            HStack(alignment: .center, spacing: 10) {
+                brandLogoBadge
+
+                if selectedTab == .routing {
+                    nodesButton
+                }
 
                 Spacer(minLength: 0)
 
@@ -42,12 +46,15 @@ struct MainWindowView: View {
 
                 Spacer(minLength: 0)
 
-                Color.clear
-                    .frame(width: 100, height: 1)
+                if selectedTab == .routing {
+                    graphRunButton
+                } else {
+                    Color.clear
+                        .frame(width: 100, height: 1)
                 }
-                .padding(.horizontal, 24)
-                .padding(.bottom, 16)
             }
+            .padding(.horizontal, 24)
+            .padding(.bottom, 16)
         }
         .animation(.easeInOut(duration: 0.2), value: selectedTab)
         .frame(width: OpenEQTheme.minWindowWidth, height: OpenEQTheme.minWindowHeight)
@@ -55,6 +62,75 @@ struct MainWindowView: View {
         .toolbarTitleDisplayMode(.inline)
         .toolbar { toolbarContent }
         .onAppear { viewModel.refreshAudioProcesses() }
+    }
+
+    private var isGraphRunning: Bool {
+        viewModel.isSystemEQActive || viewModel.isExternalLoopbackActive
+    }
+
+    private var graphRunButton: some View {
+        Button {
+            viewModel.toggleGraph()
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: isGraphRunning ? "stop.fill" : "play.fill")
+                    .font(.system(size: 11, weight: .bold))
+                Text(isGraphRunning ? "Stop Routing" : "Run Routing")
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 7.5)
+            .background(
+                isGraphRunning ? OpenEQTheme.accentRed : OpenEQTheme.accentCyan,
+                in: Capsule()
+            )
+            .foregroundStyle(isGraphRunning ? .white : .black)
+        }
+        .buttonStyle(TactileButtonStyle(pressedScale: 0.95))
+        .help(isGraphRunning ? "Stop Routing (⌘↩)" : "Run Routing (⌘↩)")
+    }
+
+    private var nodesButton: some View {
+        Button {
+            isShowingNodePalette.toggle()
+        } label: {
+            HStack(spacing: 8) {
+                ZStack {
+                    Circle()
+                        .fill(OpenEQTheme.accentCyan.opacity(0.16))
+                        .frame(width: 22, height: 22)
+
+                    Image(systemName: "plus")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(OpenEQTheme.accentCyan)
+                }
+
+                Text("Nodes")
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .foregroundStyle(.primary)
+                    .tracking(0.3)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(OpenEQTheme.cardBgElevated, in: Capsule())
+            .overlay(
+                Capsule()
+                    .stroke(isShowingNodePalette ? OpenEQTheme.accentCyan.opacity(0.5) : Color.white.opacity(0.1), lineWidth: 0.8)
+            )
+        }
+        .buttonStyle(.plain)
+        .popover(isPresented: $isShowingNodePalette, arrowEdge: .top) {
+            GraphPaletteView(
+                store: graphStore,
+                processes: viewModel.audioProcesses,
+                inputDevices: viewModel.availableInputDevices,
+                outputDevices: viewModel.availableOutputDevices,
+                onOpenFile: { viewModel.openAudioFile() }
+            )
+            .frame(width: 270, height: 420)
+            .background(OpenEQTheme.chassisBg)
+        }
+        .help("Node Library / Add Nodes")
     }
 
     private var brandLogoBadge: some View {
@@ -66,11 +142,11 @@ struct MainWindowView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
 
             Text("OpenEQ")
-                .font(.system(size: 12, weight: .bold, design: .rounded))
+                .font(.system(size: 13, weight: .bold, design: .rounded))
                 .foregroundStyle(.primary)
                 .tracking(0.3)
         }
-        .padding(.horizontal, 10)
+        .padding(.horizontal, 12)
         .padding(.vertical, 6)
         .background(OpenEQTheme.cardBgElevated, in: Capsule())
         .overlay(
@@ -102,25 +178,10 @@ struct MainWindowView: View {
     }
 
     private var routingPage: some View {
-        HStack(spacing: 0) {
-            GraphPaletteView(
-                store: graphStore,
-                processes: viewModel.audioProcesses,
-                inputDevices: viewModel.availableInputDevices,
-                outputDevices: viewModel.availableOutputDevices,
-                onOpenFile: { viewModel.openAudioFile() }
-            )
-            .frame(width: 220)
-            .background(.bar)
-            .overlay(alignment: .trailing) {
-                Divider()
+        GraphWorkspaceView(viewModel: viewModel, store: graphStore)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                routingHintBar
             }
-
-            GraphWorkspaceView(viewModel: viewModel, store: graphStore)
-        }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            routingHintBar
-        }
             .inspector(isPresented: $viewModel.showGraphInspector) {
                 NodeInspectorView(store: graphStore, viewModel: viewModel)
                     .inspectorColumnWidth(min: 300, ideal: 320, max: 380)

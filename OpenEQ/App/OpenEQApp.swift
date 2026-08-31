@@ -79,7 +79,7 @@ struct OpenEQApp: App {
         MenuBarExtra {
             MenuBarView(viewModel: viewModel)
         } label: {
-            Image(systemName: viewModel.isEnabled ? "slider.vertical.3" : "slider.vertical.3.slash")
+            Image(systemName: viewModel.isEnabled ? "slider.vertical.3" : "speaker.slash")
         }
         .menuBarExtraStyle(.menu)
     }

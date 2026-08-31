@@ -72,16 +72,6 @@ struct GraphWorkspaceView: View {
                 }
             }
 
-            Button {
-                viewModel.toggleGraph()
-            } label: {
-                Label(isRunning ? "Stop" : "Run", systemImage: isRunning ? "stop.fill" : "play.fill")
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.small)
-            .tint(isRunning ? .red : .accentColor)
-            .help(isRunning ? "Stop (⌘↩)" : "Run (⌘↩)")
-
             Text("\(store.runnableChainCount)")
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.tertiary)
