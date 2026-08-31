@@ -17,8 +17,6 @@ struct MainWindowTabContent: View {
             GraphWorkspaceView(viewModel: viewModel, store: graphStore)
         case .library:
             libraryPage
-        case .system:
-            SystemAudioView(viewModel: viewModel, contentBottomPadding: bottomContentPadding)
         }
     }
 

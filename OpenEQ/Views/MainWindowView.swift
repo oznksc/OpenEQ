@@ -20,10 +20,10 @@ struct MainWindowView: View {
     }
 
     enum MainTab: String, CaseIterable, Identifiable {
-        case equalizer, comfort, routing, library, system
+        case equalizer, comfort, routing, library
         var id: Self { self }
-        var title: String { [Self.equalizer: "Equalizer", .comfort: "Comfort", .routing: "Routing", .library: "Library", .system: "System Audio"][self]! }
-        var icon: String { [Self.equalizer: "slider.vertical.3", .comfort: "ear.and.waveform", .routing: "point.3.connected.trianglepath.dotted", .library: "square.stack.3d.up", .system: "waveform.badge.magnifyingglass"][self]! }
+        var title: String { [Self.equalizer: "Equalizer", .comfort: "Comfort", .routing: "Routing", .library: "Library"][self]! }
+        var icon: String { [Self.equalizer: "slider.vertical.3", .comfort: "ear.and.waveform", .routing: "point.3.connected.trianglepath.dotted", .library: "square.stack.3d.up"][self]! }
     }
 
     var body: some View {
@@ -58,6 +58,9 @@ struct MainWindowView: View {
         .toolbarTitleDisplayMode(.inline)
         .toolbarBackground(.hidden, for: .windowToolbar)
         .toolbar { toolbarContent }
+        .sheet(isPresented: $viewModel.isShowingSystemAudio) {
+            SystemAudioView(viewModel: viewModel)
+        }
         .onAppear { viewModel.refreshAudioProcesses() }
         .onPreferenceChange(BottomBarHeightPreferenceKey.self) { height in
             guard height > 0, abs(height - bottomBarHeight) > 0.5 else { return }
@@ -83,8 +86,11 @@ struct MainWindowView: View {
             Spacer(minLength: 0)
 
             if selectedTab != .routing {
-                PlayerControlsView(viewModel: viewModel)
-                    .frame(maxWidth: 760)
+                HStack(spacing: 10) {
+                    PlayerControlsView(viewModel: viewModel)
+                    systemAudioQuickControl
+                }
+                .frame(maxWidth: 880)
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
 
@@ -139,6 +145,55 @@ struct MainWindowView: View {
             eqStatusControl
         }
         .frame(minWidth: 174, alignment: .trailing)
+    }
+
+    private var systemAudioQuickControl: some View {
+        HStack(spacing: 2) {
+            Button {
+                viewModel.toggleSystemEQOneClick()
+            } label: {
+                HStack(spacing: 6) {
+                    OpenEQStatusDot(kind: systemAudioStatusKind, size: 7)
+                    Text("SYSTEM AUDIO")
+                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                }
+                .foregroundStyle(viewModel.isSystemEQActive ? OpenEQTheme.accentGreen : .secondary)
+                .padding(.horizontal, 10)
+                .frame(height: 26)
+                .contentShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            .help(viewModel.isSystemEQActive ? "Stop System EQ" : "Start System EQ")
+
+            Button {
+                viewModel.isShowingSystemAudio = true
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 24, height: 26)
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .help("System Audio settings")
+        }
+        .padding(3)
+        .background(.ultraThinMaterial, in: Capsule())
+        .overlay {
+            Capsule().stroke(Color.white.opacity(0.16), lineWidth: 0.8)
+        }
+        .shadow(color: Color.black.opacity(0.24), radius: 10, y: 4)
+    }
+
+    private var systemAudioStatusKind: OpenEQStatusDot.Kind {
+        if viewModel.didTripFeedbackProtection { return .warning }
+        switch viewModel.systemAudioStatus {
+        case .running: return .active
+        case .ready: return .ready
+        case .failed: return .error
+        case .permissionRequired: return .warning
+        case .unavailable, .stopped: return .idle
+        }
     }
 
     private var eqStatusControl: some View {

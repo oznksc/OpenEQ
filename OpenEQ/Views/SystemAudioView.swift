@@ -1,38 +1,45 @@
 import SwiftUI
 
 struct SystemAudioView: View {
-    let viewModel: OpenEQViewModel
-    var contentBottomPadding: CGFloat = 0
+    @Bindable var viewModel: OpenEQViewModel
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         NavigationStack {
-            VStack(alignment: .leading, spacing: 12) {
-                if viewModel.showSystemEQOnboarding { onboardingContent }
-                HStack(alignment: .top, spacing: 12) {
-                    systemCard("System-Wide EQ", icon: "dot.radiowaves.left.and.right") { oneClickContent }
-                        .frame(maxWidth: .infinity)
-                    VStack(spacing: 12) {
-                        systemCard("Device Profile", icon: "headphones") { deviceProfileContent }
-                        systemCard("Advanced", icon: "slider.horizontal.3") { advancedContent }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    if viewModel.showSystemEQOnboarding {
+                        systemCard("Get Started", icon: "bolt.fill") { onboardingContent }
                     }
-                    .frame(width: 230)
+
+                    systemCard("System-Wide EQ", icon: "dot.radiowaves.left.and.right") { oneClickContent }
+                    systemCard("Device Profile", icon: "headphones") { deviceProfileContent }
+                    systemCard("Advanced", icon: "slider.horizontal.3") { advancedContent }
+
+                    if viewModel.didTripFeedbackProtection {
+                        systemCard("Safety", icon: "exclamationmark.triangle.fill") { safetyTripContent }
+                    }
+
+                    if let banner = viewModel.safetyBannerMessage, !viewModel.didTripFeedbackProtection {
+                        Text(banner)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 4)
+                    }
+
+                    Button(role: .destructive) { viewModel.enterSafeMode() } label: {
+                        Label("Emergency Stop / Safe Mode", systemImage: "exclamationmark.octagon.fill")
+                    }
+                    .help("Immediately stop system processing and restore the original output device.")
                 }
-                if viewModel.didTripFeedbackProtection { systemCard("Safety", icon: "exclamationmark.triangle.fill") { safetyTripContent } }
-                if let banner = viewModel.safetyBannerMessage, !viewModel.didTripFeedbackProtection {
-                    Text(banner).font(.caption).foregroundStyle(.secondary).padding(.horizontal, 4)
-                }
-                Button(role: .destructive) { viewModel.enterSafeMode() } label: {
-                    Label("Emergency Stop / Safe Mode", systemImage: "exclamationmark.octagon.fill")
-                }
-                .help("Immediately stop system processing and restore the original output device.")
+                .padding(20)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(18)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            .background(OpenEQTheme.chassisBg)
+            .navigationTitle("System Audio")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Done") {
-                        viewModel.isShowingSystemAudio = false
+                        dismiss()
                     }
                     .keyboardShortcut(.escape)
                 }
@@ -51,7 +58,7 @@ struct SystemAudioView: View {
             }
             .onAppear { viewModel.refreshSystemAudioDevices() }
         }
-        .frame(minWidth: 440, idealWidth: 480, minHeight: 560, idealHeight: 640)
+        .frame(width: 520, height: 680)
     }
 
     private func systemCard<Content: View>(_ title: String, icon: String, @ViewBuilder content: () -> Content) -> some View {
@@ -59,8 +66,12 @@ struct SystemAudioView: View {
             OpenEQSectionTitle(title: title, icon: icon)
             content()
         }
-        .padding(14)
-        .studioCard(cornerRadius: 14, elevation: true)
+        .padding(16)
+        .background(.background.secondary, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(.separator.opacity(0.7), lineWidth: 0.5)
+        }
     }
 
     // MARK: - Onboarding
