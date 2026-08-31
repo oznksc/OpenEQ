@@ -35,12 +35,9 @@ struct PresetPanelView: View {
                         Text("Save")
                     }
                     .font(.system(size: 11, weight: .bold))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(OpenEQTheme.accentCyan.opacity(newPresetName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0.2 : 0.9), in: RoundedRectangle(cornerRadius: 8))
-                    .foregroundStyle(.black)
                 }
-                .buttonStyle(TactileButtonStyle())
+                .buttonStyle(.borderedProminent)
+                .tint(OpenEQTheme.accentCyan)
                 .disabled(newPresetName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 .help("Save preset")
             }
@@ -51,23 +48,24 @@ struct PresetPanelView: View {
 
             Divider().opacity(0.15)
 
-            HStack(spacing: 16) {
+            HStack(spacing: 12) {
                 Button {
                     viewModel.importPreset()
                 } label: {
                     Label("Import Preset", systemImage: "square.and.arrow.down")
                 }
-                .buttonStyle(TactileButtonStyle())
+                .buttonStyle(.bordered)
+                .foregroundStyle(.secondary)
 
                 Button {
                     viewModel.exportPreset(viewModel.selectedPreset)
                 } label: {
                     Label("Export Current", systemImage: "square.and.arrow.up")
                 }
-                .buttonStyle(TactileButtonStyle())
+                .buttonStyle(.bordered)
+                .foregroundStyle(.secondary)
             }
             .font(.system(size: 11, weight: .medium))
-            .foregroundStyle(OpenEQTheme.accentCyan)
         }
     }
 

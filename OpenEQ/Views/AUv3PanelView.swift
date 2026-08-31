@@ -26,13 +26,15 @@ struct AUv3PanelView: View {
                 Button("Load Unit") {
                     viewModel.loadSelectedAUPlugin()
                 }
-                .buttonStyle(TactileButtonStyle())
+                .buttonStyle(.borderedProminent)
+                .tint(OpenEQTheme.accentCyan)
                 .disabled(viewModel.selectedAUPluginID == nil || viewModel.isLoadingAUPlugin)
 
                 Button("Unload") {
                     viewModel.unloadAUPlugin()
                 }
-                .buttonStyle(TactileButtonStyle())
+                .buttonStyle(.bordered)
+                .foregroundStyle(.secondary)
                 .disabled(viewModel.loadedAUPluginName == nil)
 
                 Button {
@@ -40,11 +42,11 @@ struct AUv3PanelView: View {
                 } label: {
                     Image(systemName: "arrow.clockwise")
                 }
-                .buttonStyle(TactileButtonStyle())
+                .buttonStyle(.bordered)
+                .foregroundStyle(.secondary)
                 .help("Rescan AUv3 plugins")
             }
             .font(.system(size: 11, weight: .medium))
-            .foregroundStyle(OpenEQTheme.accentCyan)
 
             if viewModel.isLoadingAUPlugin {
                 HStack(spacing: 8) {

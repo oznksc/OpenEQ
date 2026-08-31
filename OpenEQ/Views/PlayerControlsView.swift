@@ -201,7 +201,7 @@ struct PlayerControlsView: View {
             } label: {
                 ZStack {
                     Circle()
-                        .fill(viewModel.isVolumeBoostEnabled ? OpenEQTheme.accentGold : Color.white.opacity(0.06))
+                        .fill(viewModel.isVolumeBoostEnabled ? OpenEQTheme.accentCyan : Color.white.opacity(0.06))
                         .frame(width: 22, height: 22)
 
                     Image(systemName: "bolt.fill")

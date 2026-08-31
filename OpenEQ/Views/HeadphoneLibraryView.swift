@@ -57,13 +57,14 @@ struct HeadphoneLibraryView: View {
 
             Divider().opacity(0.15)
 
-            HStack(spacing: 16) {
+            HStack(spacing: 12) {
                 Button {
                     viewModel.importCalibrationFile()
                 } label: {
                     Label("Import AutoEQ / REW", systemImage: "square.and.arrow.down")
                 }
-                .buttonStyle(TactileButtonStyle())
+                .buttonStyle(.bordered)
+                .foregroundStyle(.secondary)
 
                 Button {
                     if let url = URL(string: "https://autoeq.app") {
@@ -72,11 +73,11 @@ struct HeadphoneLibraryView: View {
                 } label: {
                     Label("AutoEQ.app", systemImage: "arrow.up.right.square")
                 }
-                .buttonStyle(TactileButtonStyle())
+                .buttonStyle(.bordered)
+                .foregroundStyle(.secondary)
                 .help("Open autoeq.app in browser")
             }
             .font(.system(size: 11, weight: .medium))
-            .foregroundStyle(OpenEQTheme.accentCyan)
 
             if let message = viewModel.calibrationImportMessage {
                 Text(message)
