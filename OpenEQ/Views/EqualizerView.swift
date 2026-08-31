@@ -23,16 +23,6 @@ struct EqualizerView: View {
                     .accessibilityLabel("Equalizer")
                     .accessibilityValue(viewModel.isEnabled ? "On" : "Off")
 
-                StudioSegmentedPicker(
-                    selection: Binding(
-                        get: { viewModel.eqMode },
-                        set: { viewModel.setEQMode($0) }
-                    ),
-                    items: EQMode.allCases,
-                    titleFor: { $0.title }
-                )
-                .frame(width: 190)
-
                 if viewModel.eqMode == .graphic {
                     StudioSegmentedPicker(
                         selection: bandCountBinding,
