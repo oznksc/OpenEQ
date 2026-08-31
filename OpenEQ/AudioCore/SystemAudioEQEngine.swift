@@ -57,8 +57,9 @@ final class SystemAudioEQEngine {
     private var analysisWorkChannels = 0
     private var analysisWorkFrames = 0
     private var analysisWorkSampleRate: Double = 48000
+    private var analysisAccumulatedFrames = 0
+    private var analysisAccumulationChannels = 0
     private var isAnalysisWorkerStopping = false
-    private var analysisFramesSinceLast = 0
     private var droppedAnalysisBuffers: UInt64 = 0
     private var hasScheduledTapAudioPublication = false
     private var tapTarget: ProcessTapTarget = .systemExcludingSelf
@@ -133,7 +134,8 @@ final class SystemAudioEQEngine {
                 ioCallbackCount = 0
                 ioFramesWithSignal = 0
                 droppedAnalysisBuffers = 0
-                analysisFramesSinceLast = 0
+                analysisAccumulatedFrames = 0
+                analysisAccumulationChannels = 0
                 hasScheduledTapAudioPublication = false
             }
             isReceivingTapAudio = false
@@ -169,7 +171,8 @@ final class SystemAudioEQEngine {
             ioCallbackCount = 0
             ioFramesWithSignal = 0
             droppedAnalysisBuffers = 0
-            analysisFramesSinceLast = 0
+            analysisAccumulatedFrames = 0
+            analysisAccumulationChannels = 0
             hasScheduledTapAudioPublication = false
         }
         isRunning = false
@@ -685,29 +688,39 @@ final class SystemAudioEQEngine {
         }
         let channels = min(2, nonInterleaved ? outBuffers.count : max(1, Int(first.mNumberChannels)))
         let frames = min(analysisBufferCapacity, Int(first.mDataByteSize) / (MemoryLayout<Float>.size * (nonInterleaved ? 1 : max(1, Int(first.mNumberChannels)))))
-        guard frames >= 1024 else { return }
-        analysisFramesSinceLast += frames
-        let analysisInterval = max(1024, Int(sampleRate / 20))
-        guard analysisFramesSinceLast >= analysisInterval else { return }
-        analysisFramesSinceLast = 0
+        guard frames > 0, analysisBufferCapacity > 0 else { return }
+
+        if analysisAccumulationChannels != channels {
+            analysisAccumulatedFrames = 0
+            analysisAccumulationChannels = channels
+        }
+
         let slot = analysisSlot
-        analysisSlot = (analysisSlot + 1) % 2
-        analysisPending = true
-        analysisWorkSlot = slot
-        analysisWorkChannels = channels
-        analysisWorkFrames = frames
-        analysisWorkSampleRate = sampleRate
+        let copyFrames = min(frames, analysisBufferCapacity - analysisAccumulatedFrames)
+        guard copyFrames > 0 else { return }
+        let offset = analysisAccumulatedFrames
         let buffers = analysisBuffers[slot]
         for channel in 0..<channels {
             guard let source = outBuffers[nonInterleaved ? channel : 0].mData else { continue }
-            let destination = buffers[channel]
+            let destination = buffers[channel].advanced(by: offset)
             let input = source.assumingMemoryBound(to: Float.self)
             if nonInterleaved {
-                memcpy(destination, input, frames * MemoryLayout<Float>.size)
+                memcpy(destination, input, copyFrames * MemoryLayout<Float>.size)
             } else {
-                for frame in 0..<frames { destination[frame] = input[frame * max(1, Int(first.mNumberChannels)) + channel] }
+                for frame in 0..<copyFrames { destination[frame] = input[frame * max(1, Int(first.mNumberChannels)) + channel] }
             }
         }
+
+        analysisAccumulatedFrames += copyFrames
+        guard analysisAccumulatedFrames >= analysisBufferCapacity else { return }
+
+        analysisPending = true
+        analysisWorkSlot = slot
+        analysisWorkChannels = channels
+        analysisWorkFrames = analysisBufferCapacity
+        analysisWorkSampleRate = sampleRate
+        analysisSlot = (analysisSlot + 1) % 2
+        analysisAccumulatedFrames = 0
         analysisWakeup.signal()
     }
 
@@ -920,6 +933,8 @@ final class SystemAudioEQEngine {
         for slot in analysisBuffers { for buffer in slot { buffer.deallocate() } }
         analysisBuffers.removeAll()
         analysisBufferCapacity = 0
+        analysisAccumulatedFrames = 0
+        analysisAccumulationChannels = 0
     }
 
     private func bufferFrameSize(for deviceID: AudioDeviceID) -> Int {

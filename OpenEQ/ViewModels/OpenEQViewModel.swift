@@ -24,6 +24,11 @@ final class OpenEQViewModel {
     var graphicBandCount: GraphicBandCount = .ten
     var isVolumeBoostEnabled: Bool = false
     var isShowingSystemAudio: Bool = false
+    var systemSpectrumLevels = SpectrumLevels()
+    var systemLeftLevel: Float = 0
+    var systemRightLevel: Float = 0
+    var systemPeakLevel: Float = 0
+    var systemIsClipping = false
     
     var playbackState: AudioEngineState {
         audioEngineController.playbackState
@@ -31,7 +36,7 @@ final class OpenEQViewModel {
 
     var spectrumLevels: SpectrumLevels {
         if isSystemAudioVisualizationActive {
-            return systemAudioManager.spectrumLevels
+            return systemSpectrumLevels
         }
 
         return audioEngineController.spectrumLevels
@@ -39,7 +44,7 @@ final class OpenEQViewModel {
 
     var leftLevel: Float {
         if isSystemAudioVisualizationActive {
-            return systemAudioManager.leftLevel
+            return systemLeftLevel
         }
 
         return audioEngineController.leftLevel
@@ -47,7 +52,7 @@ final class OpenEQViewModel {
 
     var rightLevel: Float {
         if isSystemAudioVisualizationActive {
-            return systemAudioManager.rightLevel
+            return systemRightLevel
         }
 
         return audioEngineController.rightLevel
@@ -55,7 +60,7 @@ final class OpenEQViewModel {
 
     var peakLevel: Float {
         if isSystemAudioVisualizationActive {
-            return systemAudioManager.peakLevel
+            return systemPeakLevel
         }
 
         return audioEngineController.peakLevel
@@ -63,7 +68,7 @@ final class OpenEQViewModel {
 
     var isClipping: Bool {
         if isSystemAudioVisualizationActive {
-            return systemAudioManager.isClipping
+            return systemIsClipping
         }
 
         return audioEngineController.isClipping
@@ -279,6 +284,14 @@ final class OpenEQViewModel {
 
         self.systemAudioManager.onPhysicalOutputChanged = { [weak self] uid, name in
             self?.handlePhysicalOutputChanged(uid: uid, name: name)
+        }
+        self.systemAudioManager.onAnalysis = { [weak self] analysis in
+            guard let self else { return }
+            self.systemSpectrumLevels = analysis.levels
+            self.systemLeftLevel = analysis.leftPeak
+            self.systemRightLevel = analysis.rightPeak
+            self.systemPeakLevel = analysis.peakLevel
+            self.systemIsClipping = analysis.isClipping
         }
         self.systemAudioManager.onSafetyTrip = { [weak self] in
             self?.handleSafetyTrip()

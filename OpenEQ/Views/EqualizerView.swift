@@ -2,7 +2,7 @@ import SwiftUI
 
 struct EqualizerView: View {
     @Bindable var viewModel: OpenEQViewModel
-    @State private var spectrumDisplayMode: SpectrumDisplayMode = .overlay
+    @State private var spectrumDisplayMode: SpectrumDisplayMode = .backdrop
 
     var body: some View {
         VStack(alignment: .leading, spacing: OpenEQTheme.sectionSpacing) {
@@ -66,19 +66,6 @@ struct EqualizerView: View {
             )
             .opacity(viewModel.isEnabled ? 1 : 0.4)
             .animation(.easeInOut(duration: 0.2), value: viewModel.isEnabled)
-
-            if spectrumDisplayMode == .expanded {
-                SpectrumView(
-                    title: viewModel.spectrumTitle,
-                    warning: viewModel.spectrumWarning,
-                    levels: viewModel.spectrumLevels,
-                    leftLevel: viewModel.leftLevel,
-                    rightLevel: viewModel.rightLevel,
-                    peakLevel: viewModel.peakLevel,
-                    isClipping: viewModel.isClipping
-                )
-                .transition(.opacity.combined(with: .move(edge: .top)))
-            }
 
             if viewModel.eqMode == .parametric {
                 HStack(spacing: 6) {

@@ -33,6 +33,7 @@ final class SystemAudioManager {
 
     var onPhysicalOutputChanged: ((String?, String?) -> Void)?
     var onSafetyTrip: (() -> Void)?
+    var onAnalysis: ((SpectrumAnalysis) -> Void)?
 
     private let deviceManager: AudioDeviceManager
     private let systemAudioEQEngine: SystemAudioEQEngine
@@ -538,14 +539,18 @@ final class SystemAudioManager {
         rightLevel = analysis.rightPeak
         peakLevel = analysis.peakLevel
         isClipping = analysis.isClipping
+        onAnalysis?(analysis)
     }
 
     private func resetAnalysis() {
-        spectrumLevels = SpectrumLevels()
-        leftLevel = 0
-        rightLevel = 0
-        peakLevel = 0
-        isClipping = false
+        let analysis = SpectrumAnalysis(
+            levels: SpectrumLevels(),
+            leftPeak: 0,
+            rightPeak: 0,
+            peakLevel: 0,
+            isClipping: false
+        )
+        applyAnalysis(analysis)
     }
 
     private func stopActive() {

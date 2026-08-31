@@ -2,21 +2,21 @@ import SwiftUI
 
 enum SpectrumDisplayMode: String, CaseIterable, Identifiable {
     case overlay
-    case expanded
+    case backdrop
 
     var id: Self { self }
 
     var title: String {
         switch self {
         case .overlay: return "Overlay"
-        case .expanded: return "Expanded"
+        case .backdrop: return "Backdrop"
         }
     }
 
     var icon: String {
         switch self {
         case .overlay: return "waveform.path.ecg"
-        case .expanded: return "chart.bar.xaxis"
+        case .backdrop: return "chart.bar.xaxis"
         }
     }
 }
