@@ -47,8 +47,8 @@ struct MainWindowTabContent: View {
     }
 
     private var comfortPage: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack {
                 HStack(spacing: 8) {
                     Image(systemName: "ear.and.waveform")
                         .font(.title3)
@@ -61,21 +61,46 @@ struct MainWindowTabContent: View {
                             .foregroundStyle(.secondary)
                     }
                 }
-
-                ListeningComfortView(viewModel: viewModel)
+                Spacer()
+                Text("REAL-TIME EAR HEALTH")
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .tracking(1.2)
+                    .foregroundStyle(OpenEQTheme.accentPurple.opacity(0.75))
             }
-            .padding(24)
-            .padding(.bottom, bottomContentPadding)
-            .frame(maxWidth: 820, alignment: .leading)
-            .frame(maxWidth: .infinity)
+
+            HStack(alignment: .top, spacing: 18) {
+                ListeningComfortView(viewModel: viewModel)
+                    .frame(maxWidth: .infinity)
+
+                VStack(alignment: .leading, spacing: 14) {
+                    comfortInsight("Session awareness", "Comfort Guard watches exposure and spectral strain while you listen.", "waveform.path.ecg", OpenEQTheme.accentCyan)
+                    comfortInsight("Gentle by design", "Relief is reversible and only appears when high-frequency load rises.", "wand.and.stars", OpenEQTheme.accentPurple)
+                }
+                .frame(width: 260)
+            }
         }
-        .scrollContentBackground(.hidden)
+        .padding(28)
+        .padding(.bottom, bottomContentPadding)
+        .frame(maxWidth: 1120, maxHeight: .infinity, alignment: .top)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(OpenEQTheme.chassisBg)
     }
 
+    private func comfortInsight(_ title: String, _ detail: String, _ icon: String, _ color: Color) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: icon).font(.title3).foregroundStyle(color)
+            VStack(alignment: .leading, spacing: 5) {
+                Text(title).font(.system(size: 12, weight: .bold))
+                Text(detail).font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .studioCard(cornerRadius: 14)
+    }
+
     private var libraryPage: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
+        VStack(alignment: .leading, spacing: 16) {
                 HStack(spacing: 8) {
                     Image(systemName: "square.stack.3d.up.fill")
                         .font(.title3)
@@ -84,28 +109,32 @@ struct MainWindowTabContent: View {
                         .font(.title3.weight(.bold))
                 }
 
-                rackModule("Presets", icon: "bookmark.fill") {
+            HStack(alignment: .top, spacing: 14) {
+                VStack(spacing: 14) {
+                    rackModule("Presets", icon: "bookmark.fill") {
                     PresetPanelView(viewModel: viewModel).padding(14)
-                }
+                    }
 
-                rackModule("Headphone Calibration Library", icon: "headphones") {
+                    rackModule("Headphone Calibration Library", icon: "headphones") {
                     HeadphoneLibraryView(viewModel: viewModel, searchText: .constant("")).padding(14)
+                    }
                 }
 
-                rackModule("Dynamics & Compressor", icon: "waveform.path.ecg") {
+                VStack(spacing: 14) {
+                    rackModule("Dynamics & Compressor", icon: "waveform.path.ecg") {
                     DynamicsPanelView(viewModel: viewModel).padding(14)
-                }
+                    }
 
-                rackModule("AUv3 Effect Units", icon: "puzzlepiece.extension.fill") {
+                    rackModule("AUv3 Effect Units", icon: "puzzlepiece.extension.fill") {
                     AUv3PanelView(viewModel: viewModel).padding(14)
+                    }
                 }
             }
-            .padding(24)
-            .padding(.bottom, bottomContentPadding)
-            .frame(maxWidth: 780, alignment: .leading)
-            .frame(maxWidth: .infinity)
         }
-        .scrollContentBackground(.hidden)
+        .padding(24)
+        .padding(.bottom, bottomContentPadding)
+        .frame(maxWidth: 1100, maxHeight: .infinity, alignment: .top)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(OpenEQTheme.chassisBg)
     }
 

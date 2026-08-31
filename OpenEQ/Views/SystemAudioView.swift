@@ -6,65 +6,28 @@ struct SystemAudioView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                if viewModel.showSystemEQOnboarding {
-                    Section {
-                        onboardingContent
+            VStack(alignment: .leading, spacing: 12) {
+                if viewModel.showSystemEQOnboarding { onboardingContent }
+                HStack(alignment: .top, spacing: 12) {
+                    systemCard("System-Wide EQ", icon: "dot.radiowaves.left.and.right") { oneClickContent }
+                        .frame(maxWidth: .infinity)
+                    VStack(spacing: 12) {
+                        systemCard("Device Profile", icon: "headphones") { deviceProfileContent }
+                        systemCard("Advanced", icon: "slider.horizontal.3") { advancedContent }
                     }
+                    .frame(width: 230)
                 }
-
-                Section {
-                    oneClickContent
-                } header: {
-                    Text("System-Wide EQ")
-                } footer: {
-                    Text("Uses a Core Audio process tap (macOS 14.2+). No BlackHole or virtual driver required.")
-                }
-
-                if viewModel.didTripFeedbackProtection {
-                    Section {
-                        safetyTripContent
-                    }
-                }
-
+                if viewModel.didTripFeedbackProtection { systemCard("Safety", icon: "exclamationmark.triangle.fill") { safetyTripContent } }
                 if let banner = viewModel.safetyBannerMessage, !viewModel.didTripFeedbackProtection {
-                    Section {
-                        Text(banner)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                    Text(banner).font(.caption).foregroundStyle(.secondary).padding(.horizontal, 4)
                 }
-
-                Section {
-                    deviceProfileContent
-                } header: {
-                    Text("Device Profile")
+                Button(role: .destructive) { viewModel.enterSafeMode() } label: {
+                    Label("Emergency Stop / Safe Mode", systemImage: "exclamationmark.octagon.fill")
                 }
-
-                Section {
-                    advancedContent
-                } header: {
-                    Text("Advanced")
-                }
-
-                Section {
-                    Button(role: .destructive) {
-                        viewModel.enterSafeMode()
-                    } label: {
-                        Label("Emergency Stop / Safe Mode", systemImage: "exclamationmark.octagon.fill")
-                    }
-                    .help("Immediately stop system processing and restore the original output device.")
-                }
-
-                if contentBottomPadding > 0 {
-                    Color.clear
-                        .frame(height: contentBottomPadding)
-                        .listRowInsets(EdgeInsets())
-                        .listRowBackground(Color.clear)
-                }
+                .help("Immediately stop system processing and restore the original output device.")
             }
-            .formStyle(.grouped)
-            .scrollContentBackground(.hidden)
+            .padding(18)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .background(OpenEQTheme.chassisBg)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -89,6 +52,15 @@ struct SystemAudioView: View {
             .onAppear { viewModel.refreshSystemAudioDevices() }
         }
         .frame(minWidth: 440, idealWidth: 480, minHeight: 560, idealHeight: 640)
+    }
+
+    private func systemCard<Content: View>(_ title: String, icon: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            OpenEQSectionTitle(title: title, icon: icon)
+            content()
+        }
+        .padding(14)
+        .studioCard(cornerRadius: 14, elevation: true)
     }
 
     // MARK: - Onboarding

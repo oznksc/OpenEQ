@@ -56,6 +56,7 @@ struct MainWindowView: View {
         .frame(width: OpenEQTheme.minWindowWidth, height: OpenEQTheme.minWindowHeight)
         .navigationTitle("")
         .toolbarTitleDisplayMode(.inline)
+        .toolbarBackground(.hidden, for: .windowToolbar)
         .toolbar { toolbarContent }
         .onAppear { viewModel.refreshAudioProcesses() }
         .onPreferenceChange(BottomBarHeightPreferenceKey.self) { height in

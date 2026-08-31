@@ -4,7 +4,7 @@ struct ListeningComfortView: View {
     @Bindable var viewModel: OpenEQViewModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 18) {
             HStack(spacing: 8) {
                 Image(systemName: "ear.and.waveform")
                     .foregroundStyle(OpenEQTheme.accentPurple)
@@ -15,7 +15,7 @@ struct ListeningComfortView: View {
                 statusBadge
             }
 
-            HStack(spacing: 18) {
+            HStack(alignment: .center, spacing: 28) {
                 scoreView
 
                 VStack(alignment: .leading, spacing: 7) {
@@ -31,7 +31,7 @@ struct ListeningComfortView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-                VStack(alignment: .trailing, spacing: 8) {
+                VStack(alignment: .trailing, spacing: 10) {
                     Toggle("Track", isOn: $viewModel.isListeningComfortEnabled)
                         .toggleStyle(.switch)
                         .controlSize(.mini)
@@ -53,8 +53,9 @@ struct ListeningComfortView: View {
                 }
             }
         }
-        .padding(14)
-        .studioCard(cornerRadius: 12, elevation: true)
+        .padding(24)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .studioCard(cornerRadius: 18, elevation: true)
     }
 
     private var statusBadge: some View {
@@ -86,7 +87,7 @@ struct ListeningComfortView: View {
             }
             .gaugeStyle(.accessoryCircular)
             .tint(statusColor)
-            .frame(width: 64, height: 64)
+            .frame(width: 122, height: 122)
         }
     }
 
