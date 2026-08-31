@@ -8,7 +8,9 @@ struct PlayerControlsView: View {
     @State private var currentTime: Double = 0.0
     @State private var isDraggingScrubber = false
     @State private var isShowingVolumePopover = false
+    @State private var isPlayerHovered = false
     private let timer = Timer.publish(every: 0.125, on: .main, in: .common).autoconnect()
+    private let progressAreaMaxWidth: CGFloat = 220
 
     var body: some View {
         let duration = max(viewModel.playbackDuration, 1)
@@ -22,21 +24,27 @@ struct PlayerControlsView: View {
                 compactControls
                     .transition(.opacity.combined(with: .scale(scale: 0.96)))
             } else {
-                let controlRow = HStack(spacing: 16) {
+                let controlRow = HStack(spacing: 8) {
                     fileInfo
                     transport
-                    progress(duration: duration)
+                    progressArea(duration: duration)
                     volume
                 }
-                .padding(.horizontal, 18)
-                .padding(.vertical, 12)
+                .padding(.leading, 4)
+                .padding(.trailing, 12)
+                .padding(.vertical, 0)
 
                 controlRow
                     .background(OpenEQTheme.cardBgElevated, in: Capsule())
                     .overlay(
-                        Capsule()
-                            .stroke(Color.white.opacity(0.12), lineWidth: 1)
+                    Capsule()
+                        .stroke(Color.white.opacity(0.12), lineWidth: 1)
                     )
+                    .onHover { isHovering in
+                        withAnimation(.easeInOut(duration: 0.16)) {
+                            isPlayerHovered = isHovering
+                        }
+                    }
                     .transition(.opacity.combined(with: .scale(scale: 0.98)))
             }
         }
@@ -65,7 +73,8 @@ struct PlayerControlsView: View {
             compactPlayButton
             compactVolumeButton
         }
-        .padding(6)
+        .padding(.horizontal, 4)
+        .padding(.vertical, 1)
         .background(.ultraThinMaterial, in: Capsule())
         .overlay {
             Capsule()
@@ -81,7 +90,6 @@ struct PlayerControlsView: View {
             Image(systemName: "folder.fill")
                 .font(.system(size: 11, weight: .semibold))
                 .frame(width: 28, height: 28)
-                .background(Color.white.opacity(0.07), in: Circle())
         }
         .buttonStyle(TactileButtonStyle())
         .help("Open Audio (⌘O)")
@@ -96,7 +104,6 @@ struct PlayerControlsView: View {
             Image(systemName: "stop.fill")
                 .font(.system(size: 10, weight: .bold))
                 .frame(width: 28, height: 28)
-                .background(Color.white.opacity(0.07), in: Circle())
         }
         .buttonStyle(TactileButtonStyle())
         .disabled(true)
@@ -116,7 +123,6 @@ struct PlayerControlsView: View {
             Image(systemName: "play.fill")
                 .font(.system(size: 11, weight: .bold))
                 .frame(width: 30, height: 30)
-                .background(Color.white.opacity(0.12), in: Circle())
         }
         .buttonStyle(TactileButtonStyle(pressedScale: 0.94))
         .disabled(true)
@@ -126,6 +132,10 @@ struct PlayerControlsView: View {
     }
 
     private var compactVolumeButton: some View {
+        volumeControlButton
+    }
+
+    private var volumeControlButton: some View {
         Button {
             isShowingVolumePopover.toggle()
         } label: {
@@ -133,7 +143,6 @@ struct PlayerControlsView: View {
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(viewModel.isMuted ? OpenEQTheme.accentRed : .primary)
                 .frame(width: 28, height: 28)
-                .background(Color.white.opacity(0.07), in: Circle())
         }
         .buttonStyle(TactileButtonStyle())
         .popover(isPresented: $isShowingVolumePopover, arrowEdge: .bottom) {
@@ -194,7 +203,7 @@ struct PlayerControlsView: View {
                     .foregroundStyle(.tertiary)
             }
         }
-        .frame(minWidth: 100, maxWidth: 140, alignment: .leading)
+        .frame(width: 120, alignment: .leading)
     }
 
     private var transport: some View {
@@ -206,7 +215,6 @@ struct PlayerControlsView: View {
                 Image(systemName: "folder.fill")
                     .font(.system(size: 11, weight: .semibold))
                     .frame(width: 28, height: 28)
-                    .background(Color.white.opacity(0.06), in: Circle())
             }
             .buttonStyle(TactileButtonStyle())
             .help("Open Audio (⌘O)")
@@ -220,7 +228,6 @@ struct PlayerControlsView: View {
                 Image(systemName: "stop.fill")
                     .font(.system(size: 10, weight: .bold))
                     .frame(width: 28, height: 28)
-                    .background(Color.white.opacity(0.06), in: Circle())
             }
             .buttonStyle(TactileButtonStyle())
             .disabled(viewModel.selectedFileURL == nil)
@@ -236,30 +243,31 @@ struct PlayerControlsView: View {
                 }
             } label: {
                 let isPlaying = viewModel.playbackState == .playing
-                ZStack {
-                    Circle()
-                        .fill(
-                            isPlaying
-                                ? OpenEQTheme.accentCyan
-                                : Color.white.opacity(0.12)
-                        )
-                        .frame(width: 32, height: 32)
-                        .overlay {
-                            Circle()
-                                .stroke(Color.white.opacity(0.2), lineWidth: 0.8)
-                        }
-
-                    Image(systemName: isPlaying ? "pause.fill" : "play.fill")
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(isPlaying ? .black : .white)
-                        .offset(x: isPlaying ? 0 : 1)
-                }
+                Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(isPlaying ? OpenEQTheme.accentCyan : .primary)
+                    .frame(width: 32, height: 32)
+                    .offset(x: isPlaying ? 0 : 1)
             }
             .buttonStyle(TactileButtonStyle(pressedScale: 0.94))
             .disabled(viewModel.selectedFileURL == nil)
             .help(viewModel.playbackState == .playing ? "Pause" : "Play")
             .accessibilityLabel(viewModel.playbackState == .playing ? "Pause" : "Play")
         }
+    }
+
+    private func progressArea(duration: Double) -> some View {
+        ZStack {
+            if isPlayerHovered {
+                progress(duration: duration)
+                    .transition(.opacity)
+            } else {
+                progressSummary(duration: duration)
+                    .transition(.opacity)
+            }
+        }
+        .frame(width: isPlayerHovered ? progressAreaMaxWidth : 82)
+        .animation(.easeInOut(duration: 0.16), value: isPlayerHovered)
     }
 
     private func progress(duration: Double) -> some View {
@@ -296,53 +304,23 @@ struct PlayerControlsView: View {
         .frame(maxWidth: .infinity)
     }
 
-    private var volume: some View {
-        HStack(spacing: 8) {
-            Button {
-                viewModel.isMuted.toggle()
-            } label: {
-                Image(systemName: volumeIcon)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(viewModel.isMuted ? OpenEQTheme.accentRed : .primary)
-                    .frame(width: 24, height: 24)
-            }
-            .buttonStyle(TactileButtonStyle())
-            .help(viewModel.isMuted ? "Unmute" : "Mute")
-            .accessibilityLabel(viewModel.isMuted ? "Unmute" : "Mute")
-
-            Slider(
-                value: Binding(
-                    get: { viewModel.isMuted ? 0 : viewModel.volume },
-                    set: {
-                        viewModel.volume = $0
-                        if viewModel.isMuted { viewModel.isMuted = false }
-                    }
-                ),
-                in: 0...(viewModel.isVolumeBoostEnabled ? 2 : 1)
-            )
-            .controlSize(.small)
-            .frame(width: 78)
-            .accessibilityLabel("Volume")
-            .accessibilityValue("\(Int((viewModel.isMuted ? 0 : viewModel.volume) * 100)) percent")
-
-            // Volume Boost Button
-            Button {
-                viewModel.toggleVolumeBoost()
-            } label: {
-                ZStack {
-                    Circle()
-                        .fill(viewModel.isVolumeBoostEnabled ? OpenEQTheme.accentCyan : Color.white.opacity(0.06))
-                        .frame(width: 22, height: 22)
-
-                    Image(systemName: "bolt.fill")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(viewModel.isVolumeBoostEnabled ? .black : .secondary)
-                }
-            }
-            .buttonStyle(TactileButtonStyle())
-            .help(viewModel.isVolumeBoostEnabled ? "Overdrive Boost On (+6 dB)" : "Enable Overdrive Boost")
-            .accessibilityLabel(viewModel.isVolumeBoostEnabled ? "Disable volume boost" : "Enable volume boost")
+    private func progressSummary(duration: Double) -> some View {
+        HStack(spacing: 4) {
+            Text(formatTime(currentTime))
+            Text("/")
+                .foregroundStyle(.tertiary)
+            Text(formatTime(viewModel.playbackDuration))
         }
+        .font(.system(size: 10, weight: .bold, design: .monospaced))
+        .foregroundStyle(.secondary)
+        .frame(width: 82)
+        .help("Hover to show playback position")
+        .accessibilityLabel("Playback position")
+        .accessibilityValue("\(formatTime(currentTime)) of \(formatTime(duration))")
+    }
+
+    private var volume: some View {
+        volumeControlButton
     }
 
     private func errorBanner(_ message: String) -> some View {

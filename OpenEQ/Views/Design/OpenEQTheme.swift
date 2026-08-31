@@ -7,6 +7,7 @@ enum OpenEQTheme {
     static let sectionSpacing: CGFloat = 14
     static let controlSpacing: CGFloat = 10
     static let playerBarCornerRadius: CGFloat = 16
+    static let bottomBarReservedSpace: CGFloat = 76
     /// Locked sidebar width — min==max prevents list content from shoving the detail.
     static let sidebarWidth: CGFloat = 268
     static let minSidebarWidth: CGFloat = 268
@@ -146,5 +147,4 @@ struct TactileButtonStyle: ButtonStyle {
             .animation(.spring(response: 0.18, dampingFraction: 0.75), value: configuration.isPressed)
     }
 }
-
 

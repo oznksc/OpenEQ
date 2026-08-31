@@ -31,6 +31,7 @@ struct MainWindowView: View {
                 case .system: SystemAudioView(viewModel: viewModel)
                 }
             }
+            .padding(.bottom, OpenEQTheme.bottomBarReservedSpace)
 
             if selectedTab == .routing,
                viewModel.showGraphInspector,
