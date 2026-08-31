@@ -12,6 +12,7 @@ struct GraphCanvasView: View {
     @State private var isCanvasFocused = false
     @State private var magnifyBase: CGFloat = 1
     @State private var inspectedNodeID: UUID? = nil
+    @State private var pendingConnectionFrom: GraphPortID?
 
     private struct NodeDragSession: Equatable {
         let id: UUID
@@ -48,6 +49,7 @@ struct GraphCanvasView: View {
                         .onTapGesture {
                             store.clearSelection()
                             inspectedNodeID = nil
+                            pendingConnectionFrom = nil
                             isCanvasFocused = true
                         }
 
@@ -84,6 +86,7 @@ struct GraphCanvasView: View {
                 .scaleEffect(store.canvasScale, anchor: .topLeading)
                 .offset(store.canvasOffset)
             }
+            .coordinateSpace(name: GraphCanvasSpace.viewport)
             .contentShape(Rectangle())
             .gesture(canvasMagnifyGesture)
             .onTapGesture(count: 2) { location in
@@ -110,6 +113,7 @@ struct GraphCanvasView: View {
                 cancelLiveDrag()
                 store.clearSelection()
                 inspectedNodeID = nil
+                pendingConnectionFrom = nil
                 return .handled
             }
             .onKeyPress(characters: CharacterSet(charactersIn: "+=")) { _ in
@@ -145,89 +149,144 @@ struct GraphCanvasView: View {
         let size = node.size
         let isDragging = nodeDrag?.id == node.id
 
-        GraphNodeView(
-            node: node,
-            isSelected: store.selectedNodeIDs.contains(node.id) || isDragging,
-            isRunning: runningNodeIDs.contains(node.id),
-            onInspect: { inspectedNodeID = node.id }
-        )
-        .equatable()
-        .position(x: origin.x + size.width / 2, y: origin.y + size.height / 2)
-        .contextMenu {
-            Button {
-                inspectedNodeID = node.id
-            } label: {
-                Label("Inspect Details...", systemImage: "slider.horizontal.3")
-            }
-
-            if case .equalizer(let eq) = node.config {
+        ZStack(alignment: .top) {
+            GraphNodeView(
+                node: node,
+                isSelected: store.selectedNodeIDs.contains(node.id) || isDragging,
+                isRunning: runningNodeIDs.contains(node.id),
+                onInspect: {
+                    withAnimation(.easeInOut(duration: 0.15)) {
+                        if inspectedNodeID == node.id {
+                            inspectedNodeID = nil
+                        } else {
+                            inspectedNodeID = node.id
+                        }
+                    }
+                }
+            )
+            .equatable()
+            .contextMenu {
                 Button {
-                    store.updateEqualizer(nodeID: node.id) { $0.isEnabled.toggle() }
+                    withAnimation(.easeInOut(duration: 0.15)) {
+                        inspectedNodeID = node.id
+                    }
                 } label: {
-                    Label(eq.isEnabled ? "Bypass EQ" : "Enable EQ", systemImage: eq.isEnabled ? "power" : "power.circle")
+                    Label("Inspect Details...", systemImage: "slider.horizontal.3")
                 }
-            } else if case .dynamics(let dyn) = node.config {
+
+                if case .equalizer(let eq) = node.config {
+                    Button {
+                        store.updateEqualizer(nodeID: node.id) { $0.isEnabled.toggle() }
+                    } label: {
+                        Label(eq.isEnabled ? "Bypass EQ" : "Enable EQ", systemImage: eq.isEnabled ? "power" : "power.circle")
+                    }
+                } else if case .dynamics(let dyn) = node.config {
+                    Button {
+                        var updated = dyn
+                        updated.settings.isCompressorEnabled.toggle()
+                        store.updateConfig(nodeID: node.id, config: .dynamics(updated))
+                    } label: {
+                        Label(dyn.settings.isCompressorEnabled ? "Bypass Compressor" : "Enable Compressor", systemImage: "waveform.path.ecg")
+                    }
+                }
+
                 Button {
-                    var updated = dyn
-                    updated.settings.isCompressorEnabled.toggle()
-                    store.updateConfig(nodeID: node.id, config: .dynamics(updated))
+                    store.disconnectAll(nodeID: node.id)
                 } label: {
-                    Label(dyn.settings.isCompressorEnabled ? "Bypass Compressor" : "Enable Compressor", systemImage: "waveform.path.ecg")
+                    Label("Disconnect Cables", systemImage: "cable.connector.slash")
+                }
+
+                Button {
+                    if let newID = store.duplicateNode(node.id) {
+                        store.selectNode(newID)
+                    }
+                } label: {
+                    Label("Duplicate Node", systemImage: "plus.square.on.square")
+                }
+
+                Divider()
+
+                Button(role: .destructive) {
+                    store.removeNode(node.id)
+                } label: {
+                    Label("Delete Node", systemImage: "trash")
                 }
             }
-
-            Button {
-                store.disconnectAll(nodeID: node.id)
-            } label: {
-                Label("Disconnect Cables", systemImage: "cable.connector.slash")
-            }
-
-            Button {
-                if let newID = store.duplicateNode(node.id) {
-                    store.selectNode(newID)
+            .overlay(alignment: .leading) {
+                if !node.kind.inputPortNames.isEmpty {
+                    Circle()
+                        .fill(Color.clear)
+                        .frame(width: 24, height: 24)
+                        .contentShape(Circle())
+                        .highPriorityGesture(inputPortTapGesture(for: node))
+                        .offset(x: -4)
+                        .help("Click to connect")
                 }
-            } label: {
-                Label("Duplicate Node", systemImage: "plus.square.on.square")
             }
+            .overlay(alignment: .trailing) {
+                if !node.kind.outputPortNames.isEmpty {
+                    Circle()
+                        .fill(Color.clear)
+                        .frame(width: 24, height: 24)
+                        .contentShape(Circle())
+                        .highPriorityGesture(wireGesture(for: node))
+                        .simultaneousGesture(outputPortTapGesture(for: node))
+                        .offset(x: 4)
+                        .help("Drag or click to connect")
+                }
+            }
+            .gesture(nodeMoveGesture(for: node))
 
-            Divider()
-
-            Button(role: .destructive) {
-                store.removeNode(node.id)
-            } label: {
-                Label("Delete Node", systemImage: "trash")
+            if inspectedNodeID == node.id {
+                inspectorOverlay(for: node, nodeSize: size, isAbove: origin.y > 220)
+                    .transition(.opacity.combined(with: .scale(scale: 0.95)))
+                    .zIndex(100)
             }
         }
-        .popover(
-            isPresented: Binding(
-                get: { inspectedNodeID == node.id },
-                set: { if !$0 { inspectedNodeID = nil } }
-            ),
-            arrowEdge: .top
-        ) {
+        .frame(width: size.width, height: size.height)
+        .position(x: origin.x + size.width / 2, y: origin.y + size.height / 2)
+        .zIndex(inspectedNodeID == node.id ? 100 : 0)
+    }
+
+    @ViewBuilder
+    private func inspectorOverlay(for node: GraphNode, nodeSize: CGSize, isAbove: Bool) -> some View {
+        let cardWidth: CGFloat = 300
+        VStack(spacing: 0) {
+            if !isAbove {
+                Image(systemName: "arrowtriangle.up.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(OpenEQTheme.cardBgElevated)
+                    .offset(y: 2)
+                    .zIndex(2)
+            }
+
             NodeInspectorView(
                 store: store,
                 viewModel: viewModel,
                 targetNodeID: node.id,
-                onClose: { inspectedNodeID = nil }
+                onClose: { withAnimation(.easeInOut(duration: 0.12)) { inspectedNodeID = nil } }
             )
-            .frame(width: 330, height: 440)
-            .background(OpenEQTheme.chassisBg)
-        }
-        // Trailing port: wire (takes priority over body move).
-        .overlay(alignment: .trailing) {
-            if !node.kind.outputPortNames.isEmpty {
-                Circle()
-                    .fill(Color.clear)
-                    .frame(width: 22, height: 22)
-                    .contentShape(Circle())
-                    .highPriorityGesture(wireGesture(for: node))
-                    .offset(x: 4)
-                    .help("Drag to connect")
+            .frame(width: cardWidth)
+            .background(OpenEQTheme.cardBgElevated)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(Color.white.opacity(0.15), lineWidth: 1)
+            )
+            .shadow(color: Color.black.opacity(0.6), radius: 20, x: 0, y: 8)
+
+            if isAbove {
+                Image(systemName: "arrowtriangle.down.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(OpenEQTheme.cardBgElevated)
+                    .offset(y: -2)
+                    .zIndex(2)
             }
         }
-        // Body: move node. No simultaneous onTapGesture — avoids the click-vs-drag delay.
-        .gesture(nodeMoveGesture(for: node))
+        .fixedSize()
+        .alignmentGuide(.top) { dimensions in
+            isAbove ? dimensions.height + 8 : -nodeSize.height - 8
+        }
     }
 
     private func nodeMoveGesture(for node: GraphNode) -> some Gesture {
@@ -315,14 +374,34 @@ struct GraphCanvasView: View {
                 if let target = hitInputPort(at: end) {
                     _ = store.connect(from: port, to: target)
                 }
+                pendingConnectionFrom = nil
                 wireDrag = nil
             }
+    }
+
+    private func outputPortTapGesture(for node: GraphNode) -> some Gesture {
+        TapGesture().onEnded {
+            let port = node.portID(name: "out")
+            pendingConnectionFrom = pendingConnectionFrom == port ? nil : port
+            store.selectNode(node.id)
+        }
+    }
+
+    private func inputPortTapGesture(for node: GraphNode) -> some Gesture {
+        TapGesture().onEnded {
+            guard let from = pendingConnectionFrom else {
+                store.selectNode(node.id)
+                return
+            }
+            _ = store.connect(from: from, to: node.portID(name: "in"))
+            pendingConnectionFrom = nil
+        }
     }
 
     // MARK: - Pan / zoom
 
     private var backgroundPanGesture: some Gesture {
-        DragGesture(minimumDistance: 3, coordinateSpace: .local)
+        DragGesture(minimumDistance: 3, coordinateSpace: .named(GraphCanvasSpace.viewport))
             .onChanged { value in
                 if panSession == nil {
                     panSession = PanSession(startOffset: store.canvasOffset)
@@ -355,6 +434,7 @@ struct GraphCanvasView: View {
         nodeDrag = nil
         wireDrag = nil
         panSession = nil
+        pendingConnectionFrom = nil
     }
 
     private func hitInputPort(at point: CGPoint) -> GraphPortID? {
@@ -395,6 +475,7 @@ struct GraphCanvasView: View {
 
 private enum GraphCanvasSpace {
     static let document = "openeq.graph.document"
+    static let viewport = "openeq.graph.viewport"
 }
 
 private struct GraphGridBackground: View {

@@ -16,23 +16,30 @@ struct NodeInspectorView: View {
     var body: some View {
         Group {
             if let node = activeNode {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: OpenEQTheme.sectionSpacing) {
-                        header(node)
+                VStack(alignment: .leading, spacing: 12) {
+                    header(node)
+                    Divider().opacity(0.12)
+
+                    if case .equalizer = node.config {
+                        ScrollView {
+                            content(for: node)
+                        }
+                        .frame(maxHeight: 280)
+                    } else {
                         content(for: node)
                     }
-                    .padding(16)
-                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
+                .padding(14)
+                .frame(maxWidth: .infinity, alignment: .leading)
             } else {
                 ContentUnavailableView(
                     "No Selection",
                     systemImage: "point.3.connected.trianglepath.dotted",
                     description: Text("Select a node to edit its settings.")
                 )
+                .padding(14)
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func header(_ node: GraphNode) -> some View {
