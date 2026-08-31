@@ -1,5 +1,26 @@
 import SwiftUI
 
+enum SpectrumDisplayMode: String, CaseIterable, Identifiable {
+    case overlay
+    case expanded
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .overlay: return "Overlay"
+        case .expanded: return "Expanded"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .overlay: return "waveform.path.ecg"
+        case .expanded: return "chart.bar.xaxis"
+        }
+    }
+}
+
 /// Frequency-response curve with tactile studio oscilloscope rendering, glow layers, and interactive nodes.
 struct EQCurveView: View {
     let bands: [EQBand]
@@ -7,6 +28,8 @@ struct EQCurveView: View {
     let preamp: Float
     var selectedBandID: EQBand.ID?
     var isInteractive: Bool = true
+    var spectrumLevels: SpectrumLevels = SpectrumLevels()
+    var spectrumDisplayMode: SpectrumDisplayMode = .overlay
     var onSelectBand: ((EQBand.ID) -> Void)?
     var onBandChanged: ((Int, EQBand) -> Void)?
 
@@ -18,6 +41,7 @@ struct EQCurveView: View {
     @State private var draggingBandID: EQBand.ID?
     @State private var hoveredBandID: EQBand.ID?
     @State private var cursorLocation: CGPoint? = nil
+    @State private var spectrumPeakLevels = SpectrumLevels()
 
     var body: some View {
         GeometryReader { geometry in
@@ -37,6 +61,10 @@ struct EQCurveView: View {
                         height: max(1, size.height - 40)
                     )
                     drawOscilloscopeGrid(in: rect, context: &context)
+                    if spectrumDisplayMode == .overlay {
+                        drawSpectrumOverlay(in: rect, context: &context)
+                    }
+                    drawUnderCurveFill(in: rect, context: &context)
                     if mode == .parametric, let activeID = hoveredBandID ?? draggingBandID ?? selectedBandID,
                        let band = bands.first(where: { $0.id == activeID }) {
                         drawQEnvelope(for: band, in: rect, context: &context)
@@ -83,6 +111,9 @@ struct EQCurveView: View {
               ? "Drag nodes to set frequency/gain. Scroll over a node to change Q."
               : "EQ frequency response")
         .accessibilityLabel("EQ curve from 20 hertz to 20 kilohertz, gain minus 24 to plus 24 decibels.")
+        .onChange(of: spectrumLevels) { _, newValue in
+            updateSpectrumPeaks(with: newValue)
+        }
     }
 
     private func interactionLayer(plotRect: CGRect) -> some View {
@@ -182,6 +213,53 @@ struct EQCurveView: View {
     }
 
     // MARK: - Canvas Rendering
+
+    private func drawSpectrumOverlay(in rect: CGRect, context: inout GraphicsContext) {
+        guard spectrumLevels.contains(where: { $0 > 0.012 }) else { return }
+
+        let baseline = rect.maxY
+        let sampleCount = spectrumLevels.count
+        var fillPath = Path()
+        var tracePath = Path()
+        fillPath.move(to: CGPoint(x: rect.minX, y: baseline))
+
+        for index in 0..<sampleCount {
+            let progress = CGFloat(index) / CGFloat(max(sampleCount - 1, 1))
+            let level = CGFloat(max(0, min(1, spectrumLevels[index])))
+            let peak = CGFloat(max(0, min(1, spectrumPeakLevels[index])))
+            let smoothedLevel = level * 0.78 + peak * 0.22
+            let x = rect.minX + rect.width * progress
+            let y = baseline - rect.height * (0.05 + smoothedLevel * 0.78)
+            let point = CGPoint(x: x, y: y)
+
+            if index == 0 {
+                tracePath.move(to: point)
+            } else {
+                tracePath.addLine(to: point)
+            }
+            fillPath.addLine(to: point)
+        }
+
+        fillPath.addLine(to: CGPoint(x: rect.maxX, y: baseline))
+        fillPath.closeSubpath()
+        context.fill(
+            fillPath,
+            with: .linearGradient(
+                Gradient(colors: [
+                    OpenEQTheme.accentPurple.opacity(0.22),
+                    OpenEQTheme.accentCyan.opacity(0.08),
+                    Color.clear
+                ]),
+                startPoint: CGPoint(x: 0, y: rect.minY),
+                endPoint: CGPoint(x: 0, y: rect.maxY)
+            )
+        )
+        context.stroke(
+            tracePath,
+            with: .color(OpenEQTheme.accentPurple.opacity(0.52)),
+            style: StrokeStyle(lineWidth: 1, lineJoin: .round)
+        )
+    }
 
     private func drawOscilloscopeGrid(in rect: CGRect, context: inout GraphicsContext) {
         let gridColor = Color.white.opacity(0.06)
@@ -319,6 +397,21 @@ struct EQCurveView: View {
             let coreRect = CGRect(x: center.x - coreRadius, y: center.y - coreRadius, width: coreRadius * 2, height: coreRadius * 2)
             context.fill(Path(ellipseIn: coreRect), with: .color(bandColor))
             context.stroke(Path(ellipseIn: coreRect), with: .color(.white.opacity(0.9)), lineWidth: 1.0)
+        }
+    }
+
+    private func updateSpectrumPeaks(with current: SpectrumLevels) {
+        if spectrumPeakLevels.count != current.count {
+            spectrumPeakLevels = current
+            return
+        }
+
+        for index in current.indices {
+            if current[index] >= spectrumPeakLevels[index] {
+                spectrumPeakLevels[index] = current[index]
+            } else {
+                spectrumPeakLevels[index] = max(0, spectrumPeakLevels[index] - 0.028)
+            }
         }
     }
 

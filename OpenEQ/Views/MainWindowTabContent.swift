@@ -26,15 +26,6 @@ struct MainWindowTabContent: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 EqualizerView(viewModel: viewModel)
-                SpectrumView(
-                    title: viewModel.spectrumTitle,
-                    warning: viewModel.spectrumWarning,
-                    levels: viewModel.spectrumLevels,
-                    leftLevel: viewModel.leftLevel,
-                    rightLevel: viewModel.rightLevel,
-                    peakLevel: viewModel.peakLevel,
-                    isClipping: viewModel.isClipping
-                )
             }
             .padding(24)
             .padding(.bottom, bottomContentPadding)

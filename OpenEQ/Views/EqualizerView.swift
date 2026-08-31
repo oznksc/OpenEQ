@@ -2,6 +2,7 @@ import SwiftUI
 
 struct EqualizerView: View {
     @Bindable var viewModel: OpenEQViewModel
+    @State private var spectrumDisplayMode: SpectrumDisplayMode = .overlay
 
     var body: some View {
         VStack(alignment: .leading, spacing: OpenEQTheme.sectionSpacing) {
@@ -40,6 +41,14 @@ struct EqualizerView: View {
                     )
                     .frame(width: 150)
                 }
+
+                StudioSegmentedPicker(
+                    selection: $spectrumDisplayMode,
+                    items: SpectrumDisplayMode.allCases,
+                    titleFor: { $0.title },
+                    iconFor: { $0.icon }
+                )
+                .frame(width: 190)
             }
 
             EQCurveView(
@@ -48,6 +57,8 @@ struct EqualizerView: View {
                 preamp: viewModel.preamp,
                 selectedBandID: viewModel.selectedBandID,
                 isInteractive: viewModel.isEnabled,
+                spectrumLevels: viewModel.spectrumLevels,
+                spectrumDisplayMode: spectrumDisplayMode,
                 onSelectBand: { viewModel.selectBand(id: $0) },
                 onBandChanged: { index, band in
                     viewModel.updateBandFromCurve(index: index, band: band)
@@ -55,6 +66,19 @@ struct EqualizerView: View {
             )
             .opacity(viewModel.isEnabled ? 1 : 0.4)
             .animation(.easeInOut(duration: 0.2), value: viewModel.isEnabled)
+
+            if spectrumDisplayMode == .expanded {
+                SpectrumView(
+                    title: viewModel.spectrumTitle,
+                    warning: viewModel.spectrumWarning,
+                    levels: viewModel.spectrumLevels,
+                    leftLevel: viewModel.leftLevel,
+                    rightLevel: viewModel.rightLevel,
+                    peakLevel: viewModel.peakLevel,
+                    isClipping: viewModel.isClipping
+                )
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
 
             if viewModel.eqMode == .parametric {
                 HStack(spacing: 6) {
@@ -350,4 +374,3 @@ struct TactileFaderCap: View {
     )
     .padding(24)
 }
-
