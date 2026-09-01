@@ -470,9 +470,10 @@ final class OpenEQTests: XCTestCase {
 
     func testSystemAudioLimiterRemainsActiveWhenEQIsBypassed() {
         let dsp = SystemAudioDSPState()
+        dsp.configure(.flatPreset(), sampleRate: 48_000)
         dsp.isBypassed = true
 
-        let frameCount = 32
+        let frameCount = 128
         let samples = UnsafeMutablePointer<Float>.allocate(capacity: frameCount)
         samples.initialize(repeating: 1, count: frameCount)
         defer {
@@ -482,8 +483,10 @@ final class OpenEQTests: XCTestCase {
 
         dsp.process(samples, frames: frameCount, channel: 0)
 
-        XCTAssertLessThan(samples[0], 1)
-        XCTAssertGreaterThan(samples[0], 0)
+        var maximum: Float = 0
+        for frame in 0..<frameCount { maximum = max(maximum, abs(samples[frame])) }
+        XCTAssertLessThanOrEqual(maximum, 0.98)
+        XCTAssertGreaterThan(maximum, 0)
     }
 
     func testAudioUnitBandwidthMatchesQDefinition() {
@@ -495,9 +498,49 @@ final class OpenEQTests: XCTestCase {
         let frameCount = 8192
         let input = sineWave(frequency: 997, frameCount: frameCount, amplitude: 0.25)
         let output = processSystemDSP(input, preset: .flatPreset())
-        let maximumError = zip(input, output).map { abs($0 - $1) }.max() ?? 1
+        let latency = SystemAudioDSPState.limiterLatencyFrames(for: 48_000)
+        let maximumError = zip(input.dropLast(latency), output.dropFirst(latency))
+            .map { abs($0 - $1) }
+            .max() ?? 1
 
         XCTAssertLessThan(maximumError, 1e-6)
+    }
+
+    func testSystemAudioLimiterLookAheadCatchesFullScaleImpulse() {
+        let sampleRate = 48_000.0
+        let latency = SystemAudioDSPState.limiterLatencyFrames(for: sampleRate)
+        var samples = [Float](repeating: 0, count: latency * 3)
+        samples[0] = 2
+        let dsp = SystemAudioDSPState()
+        dsp.configure(.flatPreset(), sampleRate: sampleRate)
+        dsp.isBypassed = true
+
+        samples.withUnsafeMutableBufferPointer {
+            dsp.process($0.baseAddress!, frames: $0.count, channel: 0)
+        }
+
+        XCTAssertEqual(samples[latency], 0.98, accuracy: 1e-6)
+        XCTAssertEqual(samples.prefix(latency).map(abs).max(), 0)
+        XCTAssertLessThanOrEqual(samples.map(abs).max() ?? 2, 0.98)
+    }
+
+    func testSystemAudioLimiterLatencyIsOneMillisecondAcrossSampleRates() {
+        for sampleRate in [44_100.0, 48_000.0, 96_000.0, 192_000.0] {
+            let frames = SystemAudioDSPState.limiterLatencyFrames(for: sampleRate)
+            XCTAssertEqual(Double(frames) / sampleRate, 0.001, accuracy: 1 / sampleRate)
+        }
+    }
+
+    func testSystemAudioLimiterReleaseTimingIsSampleRateIndependent() {
+        let reference = limiterReleaseProbe(sampleRate: 48_000, elapsed: 0.020)
+        for sampleRate in [44_100.0, 96_000.0, 192_000.0] {
+            XCTAssertEqual(
+                limiterReleaseProbe(sampleRate: sampleRate, elapsed: 0.020),
+                reference,
+                accuracy: 0.002,
+                "Limiter release changed at \(sampleRate) Hz"
+            )
+        }
     }
 
     func testSystemAudioDSPParametricBoostMatchesRequestedGain() {
@@ -748,6 +791,21 @@ final class OpenEQTests: XCTestCase {
         (0..<frameCount).map {
             amplitude * sin(2 * Float.pi * Float(frequency) * Float($0) / Float(sampleRate))
         }
+    }
+
+    private func limiterReleaseProbe(sampleRate: Double, elapsed: Double) -> Float {
+        let latency = SystemAudioDSPState.limiterLatencyFrames(for: sampleRate)
+        let hotFrames = latency + 1
+        let releaseFrames = Int((elapsed * sampleRate).rounded())
+        var samples = [Float](repeating: 0.5, count: latency + hotFrames + releaseFrames + 1)
+        for frame in 0..<hotFrames { samples[frame] = 2 }
+        let dsp = SystemAudioDSPState()
+        dsp.configure(.flatPreset(), sampleRate: sampleRate)
+        dsp.isBypassed = true
+        samples.withUnsafeMutableBufferPointer {
+            dsp.process($0.baseAddress!, frames: $0.count, channel: 0)
+        }
+        return samples[latency + hotFrames + releaseFrames]
     }
 
     private func processSystemDSP(

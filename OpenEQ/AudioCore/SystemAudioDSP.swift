@@ -243,8 +243,57 @@ private struct DSPChannelControlState {
 
 private enum SystemAudioLimiter {
     static let ceiling: Float = 0.98
-    static let attack: Float = 0.35
-    static let release: Float = 0.0025
+    static let lookAheadSeconds = 0.001
+    static let releaseSeconds = 0.050
+    static let maximumLookAheadFrames = 2_048
+}
+
+private struct LookAheadLimiterState {
+    private var delayLine = [Float](repeating: 0, count: SystemAudioLimiter.maximumLookAheadFrames)
+    private var writeIndex = 0
+    private var delayFrames = 48
+    private var holdFrames = 0
+    private var gain: Float = 1
+    private var releaseCoefficient: Float = 0.000_416_58
+
+    mutating func configure(sampleRate: Double) {
+        let newDelayFrames = SystemAudioDSPState.limiterLatencyFrames(for: sampleRate)
+        releaseCoefficient = Float(1 - exp(-1 / (SystemAudioLimiter.releaseSeconds * sampleRate)))
+        guard newDelayFrames != delayFrames else { return }
+        delayFrames = newDelayFrames
+        reset()
+    }
+
+    mutating func process(_ samples: UnsafeMutablePointer<Float>, frames: Int) {
+        let ceiling = SystemAudioLimiter.ceiling
+        for frame in 0..<frames {
+            let input = samples[frame]
+            let delayed = delayLine[writeIndex]
+            delayLine[writeIndex] = input
+            writeIndex += 1
+            if writeIndex == delayFrames { writeIndex = 0 }
+
+            let magnitude = abs(input)
+            let requiredGain = magnitude > ceiling ? ceiling / magnitude : 1
+            if requiredGain < gain {
+                gain = requiredGain
+                holdFrames = delayFrames + 1
+            } else if holdFrames > 0 {
+                holdFrames -= 1
+            } else {
+                gain += (1 - gain) * releaseCoefficient
+            }
+
+            samples[frame] = max(-ceiling, min(ceiling, delayed * gain))
+        }
+    }
+
+    mutating func reset() {
+        delayLine.withUnsafeMutableBufferPointer { $0.initialize(repeating: 0) }
+        writeIndex = 0
+        holdFrames = 0
+        gain = 1
+    }
 }
 
 final class SystemAudioDSPState {
@@ -252,8 +301,8 @@ final class SystemAudioDSPState {
     private let biquadCascade = VDSPBiquadCascade(sectionCount: sectionCount)
     private var leftControl = DSPChannelControlState()
     private var rightControl = DSPChannelControlState()
-    private var leftLimiterGain: Float = 1
-    private var rightLimiterGain: Float = 1
+    private var leftLimiter = LookAheadLimiterState()
+    private var rightLimiter = LookAheadLimiterState()
     var isBypassed = false
     var isEmergencyMuted = false
 
@@ -264,6 +313,8 @@ final class SystemAudioDSPState {
         let preampTarget = pow(10, preset.preamp / 20)
         leftControl.configureTiming(sampleRate: safeSampleRate)
         rightControl.configureTiming(sampleRate: safeSampleRate)
+        leftLimiter.configure(sampleRate: safeSampleRate)
+        rightLimiter.configure(sampleRate: safeSampleRate)
         leftControl.startPreampTransition(to: preampTarget, durationFrames: preampTransitionFrames)
         rightControl.startPreampTransition(to: preampTarget, durationFrames: preampTransitionFrames)
         for index in 0..<Self.sectionCount {
@@ -276,8 +327,8 @@ final class SystemAudioDSPState {
     }
 
     func reset() {
-        leftLimiterGain = 1
-        rightLimiterGain = 1
+        leftLimiter.reset()
+        rightLimiter.reset()
         isBypassed = false
         isEmergencyMuted = false
         leftControl.reset()
@@ -301,31 +352,18 @@ final class SystemAudioDSPState {
         }
 
         if channel == 0 {
-            applyPeakLimiter(samples, frames: frames, gain: &leftLimiterGain)
+            leftLimiter.process(samples, frames: frames)
         } else {
-            applyPeakLimiter(samples, frames: frames, gain: &rightLimiterGain)
+            rightLimiter.process(samples, frames: frames)
         }
     }
 
-    private func applyPeakLimiter(
-        _ samples: UnsafeMutablePointer<Float>,
-        frames: Int,
-        gain: inout Float
-    ) {
-        let ceiling = SystemAudioLimiter.ceiling
-        for index in 0..<frames {
-            let absSample = abs(samples[index])
-            let needed = absSample > ceiling ? ceiling / absSample : 1
-            if needed < gain {
-                gain += (needed - gain) * SystemAudioLimiter.attack
-            } else {
-                gain += (1 - gain) * SystemAudioLimiter.release
-            }
-            var out = samples[index] * gain
-            if out > 1 { out = 1 }
-            if out < -1 { out = -1 }
-            samples[index] = out
-        }
+    static func limiterLatencyFrames(for sampleRate: Double) -> Int {
+        let safeSampleRate = sampleRate.isFinite && sampleRate > 0 ? sampleRate : 48_000
+        return min(
+            SystemAudioLimiter.maximumLookAheadFrames,
+            max(1, Int((SystemAudioLimiter.lookAheadSeconds * safeSampleRate).rounded()))
+        )
     }
 
     private static func makeCoefficients(for band: EQBand, sampleRate: Float) -> BiquadCoefficients {
