@@ -17,22 +17,23 @@ private struct BiquadCoefficients {
 }
 
 private struct SmoothingCoefficients {
-    static let duration = 512
     private var start: BiquadCoefficients = .identity
     private var current: BiquadCoefficients = .identity
     private var target: BiquadCoefficients = .identity
     private var remaining = 0
+    private var duration = 512
 
-    mutating func startTransition(to newTarget: BiquadCoefficients) {
+    mutating func startTransition(to newTarget: BiquadCoefficients, durationFrames: Int) {
         current = interpolatedCoeffs()
         start = current
         target = newTarget
-        remaining = Self.duration
+        duration = max(1, durationFrames)
+        remaining = duration
     }
 
     func interpolatedCoeffs() -> BiquadCoefficients {
         guard remaining > 0 else { return current }
-        let t = 1 - Float(remaining) / Float(Self.duration)
+        let t = 1 - Float(remaining) / Float(duration)
         return lerp(start, target, t)
     }
 
@@ -43,7 +44,7 @@ private struct SmoothingCoefficients {
             remaining = 0
         } else {
             remaining -= frames
-            let t = 1 - Float(remaining) / Float(Self.duration)
+            let t = 1 - Float(remaining) / Float(duration)
             current = lerp(start, target, t)
         }
     }
@@ -127,24 +128,27 @@ private final class VDSPBiquadCascade {
 }
 
 private struct SmoothedGain {
-    static let duration = 256
     private var start: Float = 1
     private var current: Float = 1
     private var target: Float = 1
     private var remaining = 0
+    private var duration = 256
 
-    mutating func startTransition(to newTarget: Float) {
+    mutating func startTransition(to newTarget: Float, durationFrames: Int) {
         current = value
         start = current
         target = newTarget
-        remaining = Self.duration
+        duration = max(1, durationFrames)
+        remaining = duration
     }
 
     var value: Float {
         guard remaining > 0 else { return current }
-        let progress = 1 - Float(remaining) / Float(Self.duration)
+        let progress = 1 - Float(remaining) / Float(duration)
         return start + (target - start) * progress
     }
+
+    var isTransitioning: Bool { remaining > 0 }
 
     mutating func advance(frames: Int) {
         guard remaining > 0 else { return }
@@ -163,20 +167,25 @@ private struct SmoothedGain {
 }
 
 private struct DSPChannelControlState {
-    private static let coefficientUpdateInterval = 32
     private var smoothingCoeffs = Array(repeating: SmoothingCoefficients(), count: 31)
     private var interpolatedCoeffs = Array(repeating: BiquadCoefficients.identity, count: 31)
     private var preamp = SmoothedGain()
+    private var coefficientUpdateInterval = 32
     private var framesUntilCoefficientUpdate = 0
     private var hasActiveFilters = false
 
-    mutating func startFilterTransition(index: Int, to coefficients: BiquadCoefficients) {
-        smoothingCoeffs[index].startTransition(to: coefficients)
+    mutating func configureTiming(sampleRate: Double) {
+        coefficientUpdateInterval = max(1, Int((32 * sampleRate / 48_000).rounded()))
         framesUntilCoefficientUpdate = 0
     }
 
-    mutating func startPreampTransition(to target: Float) {
-        preamp.startTransition(to: target)
+    mutating func startFilterTransition(index: Int, to coefficients: BiquadCoefficients, durationFrames: Int) {
+        smoothingCoeffs[index].startTransition(to: coefficients, durationFrames: durationFrames)
+        framesUntilCoefficientUpdate = 0
+    }
+
+    mutating func startPreampTransition(to target: Float, durationFrames: Int) {
+        preamp.startTransition(to: target, durationFrames: durationFrames)
         framesUntilCoefficientUpdate = 0
     }
 
@@ -198,14 +207,18 @@ private struct DSPChannelControlState {
                 if hasActiveFilters {
                     cascade.updateCoefficients(interpolatedCoeffs)
                 }
-                framesUntilCoefficientUpdate = Self.coefficientUpdateInterval
+                framesUntilCoefficientUpdate = coefficientUpdateInterval
             }
 
             let chunkFrames = min(frames - offset, framesUntilCoefficientUpdate)
             let chunk = samples.advanced(by: offset)
-            let gainValue = preamp.value
-            if abs(gainValue - 1) > 0.0001 {
-                var gain = gainValue
+            if preamp.isTransitioning {
+                for frame in 0..<chunkFrames {
+                    chunk[frame] *= preamp.value
+                    preamp.advance(frames: 1)
+                }
+            } else if abs(preamp.value - 1) > 0.0001 {
+                var gain = preamp.value
                 vDSP_vsmul(chunk, 1, &gain, chunk, 1, vDSP_Length(chunkFrames))
             }
             if hasActiveFilters {
@@ -214,7 +227,6 @@ private struct DSPChannelControlState {
             for index in smoothingCoeffs.indices {
                 smoothingCoeffs[index].advance(frames: chunkFrames)
             }
-            preamp.advance(frames: chunkFrames)
             framesUntilCoefficientUpdate -= chunkFrames
             offset += chunkFrames
         }
@@ -246,15 +258,20 @@ final class SystemAudioDSPState {
     var isEmergencyMuted = false
 
     func configure(_ preset: EQPreset, sampleRate: Double) {
+        let safeSampleRate = sampleRate.isFinite && sampleRate > 0 ? sampleRate : 48_000
+        let filterTransitionFrames = max(1, Int((512 * safeSampleRate / 48_000).rounded()))
+        let preampTransitionFrames = max(1, Int((256 * safeSampleRate / 48_000).rounded()))
         let preampTarget = pow(10, preset.preamp / 20)
-        leftControl.startPreampTransition(to: preampTarget)
-        rightControl.startPreampTransition(to: preampTarget)
+        leftControl.configureTiming(sampleRate: safeSampleRate)
+        rightControl.configureTiming(sampleRate: safeSampleRate)
+        leftControl.startPreampTransition(to: preampTarget, durationFrames: preampTransitionFrames)
+        rightControl.startPreampTransition(to: preampTarget, durationFrames: preampTransitionFrames)
         for index in 0..<Self.sectionCount {
             let coefficients = index < preset.bands.count
-                ? Self.makeCoefficients(for: preset.bands[index], sampleRate: Float(sampleRate))
+                ? Self.makeCoefficients(for: preset.bands[index], sampleRate: Float(safeSampleRate))
                 : .identity
-            leftControl.startFilterTransition(index: index, to: coefficients)
-            rightControl.startFilterTransition(index: index, to: coefficients)
+            leftControl.startFilterTransition(index: index, to: coefficients, durationFrames: filterTransitionFrames)
+            rightControl.startFilterTransition(index: index, to: coefficients, durationFrames: filterTransitionFrames)
         }
     }
 

@@ -671,6 +671,74 @@ final class OpenEQTests: XCTestCase {
         XCTAssertGreaterThan(left.dropFirst(1025).map(abs).max() ?? 0, 0)
     }
 
+    func testSystemAudioDSPFrequencyResponseAcrossSupportedSampleRates() {
+        let band = EQBand(frequency: 1000, gain: 6, q: 1, filterType: .parametric)
+        let preset = EQPreset(name: "Sample-rate matrix", mode: .parametric, bands: [band])
+
+        for sampleRate in [44_100.0, 48_000.0, 96_000.0, 192_000.0] {
+            XCTAssertEqual(
+                measuredSystemDSPGain(frequency: 1000, preset: preset, sampleRate: sampleRate),
+                6,
+                accuracy: 0.25,
+                "Unexpected response at \(sampleRate) Hz"
+            )
+        }
+    }
+
+    func testSystemAudioDSPSmoothingDurationIsSampleRateIndependent() {
+        let preset = EQPreset(name: "Timed preamp", bands: [], preamp: 12)
+        let reference = preampEnvelopeValue(after: 0.004, sampleRate: 48_000, preset: preset)
+
+        for sampleRate in [44_100.0, 96_000.0, 192_000.0] {
+            XCTAssertEqual(
+                preampEnvelopeValue(after: 0.004, sampleRate: sampleRate, preset: preset),
+                reference,
+                accuracy: 0.01,
+                "Smoothing duration changed at \(sampleRate) Hz"
+            )
+        }
+    }
+
+    func testSystemAudioDSPRemainsFiniteNearNyquistAtEverySampleRate() {
+        let band = EQBand(frequency: 20_000, gain: 24, q: 10, filterType: .parametric)
+        let preset = EQPreset(name: "Nyquist stress", mode: .parametric, bands: [band], preamp: -12)
+
+        for sampleRate in [44_100.0, 48_000.0, 96_000.0, 192_000.0] {
+            let probeFrequency = min(20_000, sampleRate * 0.48)
+            let input = sineWave(
+                frequency: probeFrequency,
+                frameCount: Int(sampleRate / 4),
+                amplitude: 0.05,
+                sampleRate: sampleRate
+            )
+            let output = processSystemDSP(input, preset: preset, sampleRate: sampleRate)
+
+            XCTAssertTrue(output.allSatisfy(\.isFinite), "Non-finite output at \(sampleRate) Hz")
+            XCTAssertLessThanOrEqual(output.map(abs).max() ?? 2, 1)
+        }
+    }
+
+    func testSystemAudioDSPHandlesRuntimeSampleRateChangeWithoutInstability() {
+        let band = EQBand(frequency: 8000, gain: 18, q: 8, filterType: .parametric)
+        let preset = EQPreset(name: "Rate transition", mode: .parametric, bands: [band], preamp: -6)
+        let dsp = SystemAudioDSPState()
+        dsp.configure(preset, sampleRate: 48_000)
+        var first = sineWave(frequency: 8000, frameCount: 4096, amplitude: 0.1, sampleRate: 48_000)
+        first.withUnsafeMutableBufferPointer {
+            dsp.process($0.baseAddress!, frames: $0.count, channel: 0)
+        }
+
+        dsp.configure(preset, sampleRate: 96_000)
+        var second = sineWave(frequency: 8000, frameCount: 8192, amplitude: 0.1, sampleRate: 96_000)
+        second.withUnsafeMutableBufferPointer {
+            dsp.process($0.baseAddress!, frames: $0.count, channel: 0)
+        }
+
+        XCTAssertTrue(second.allSatisfy(\.isFinite))
+        XCTAssertLessThanOrEqual(second.map(abs).max() ?? 2, 1)
+        XCTAssertGreaterThan(second.map(abs).max() ?? 0, 0.01)
+    }
+
     private func sineWave(
         frequency: Double,
         frameCount: Int,
@@ -728,14 +796,34 @@ final class OpenEQTests: XCTestCase {
         zip(lhs, rhs).reduce(0) { max($0, abs($1.0 - $1.1)) }
     }
 
-    private func measuredSystemDSPGain(frequency: Double, preset: EQPreset) -> Double {
+    private func measuredSystemDSPGain(
+        frequency: Double,
+        preset: EQPreset,
+        sampleRate: Double = 48_000
+    ) -> Double {
         let amplitude: Float = 0.05
-        let input = sineWave(frequency: frequency, frameCount: 48_000, amplitude: amplitude)
-        let output = processSystemDSP(input, preset: preset)
-        let settled = output.dropFirst(4096)
+        let input = sineWave(
+            frequency: frequency,
+            frameCount: Int(sampleRate),
+            amplitude: amplitude,
+            sampleRate: sampleRate
+        )
+        let output = processSystemDSP(input, preset: preset, sampleRate: sampleRate)
+        let settled = output.dropFirst(Int(sampleRate * 0.1))
         let outputRMS = sqrt(settled.reduce(0.0) { $0 + Double($1 * $1) } / Double(settled.count))
         let inputRMS = Double(amplitude) / sqrt(2)
         return 20 * log10(outputRMS / inputRMS)
+    }
+
+    private func preampEnvelopeValue(after duration: Double, sampleRate: Double, preset: EQPreset) -> Float {
+        let frameCount = Int((duration * sampleRate).rounded())
+        var samples = [Float](repeating: 0.05, count: frameCount)
+        let dsp = SystemAudioDSPState()
+        dsp.configure(preset, sampleRate: sampleRate)
+        samples.withUnsafeMutableBufferPointer {
+            dsp.process($0.baseAddress!, frames: $0.count, channel: 0)
+        }
+        return samples.last! / 0.05
     }
 
     private func measuredAudioUnitGain(
