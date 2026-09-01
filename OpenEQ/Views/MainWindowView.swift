@@ -196,13 +196,34 @@ struct MainWindowView: View {
         }
     }
 
+    @ViewBuilder
     private var eqStatusControl: some View {
+        if #available(macOS 26.0, *) {
+            GlassEffectContainer(spacing: 4) {
+                eqStatusSegments(usesLiquidGlass: true)
+                    .padding(3)
+                    .glassEffect(.regular.interactive(), in: .capsule)
+            }
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Equalizer state")
+        } else {
+            eqStatusSegments(usesLiquidGlass: false)
+                .padding(3)
+                .background(.ultraThinMaterial, in: Capsule())
+                .overlay { Capsule().stroke(Color.white.opacity(0.16), lineWidth: 0.8) }
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel("Equalizer state")
+        }
+    }
+
+    private func eqStatusSegments(usesLiquidGlass: Bool) -> some View {
         HStack(spacing: 2) {
             eqStatusSegment(
                 title: "ACTIVE",
                 icon: "checkmark.circle.fill",
                 isSelected: viewModel.isEnabled,
                 color: OpenEQTheme.accentGreen,
+                usesLiquidGlass: usesLiquidGlass,
                 action: { viewModel.setEnabled(true) }
             )
 
@@ -211,28 +232,22 @@ struct MainWindowView: View {
                 icon: "circle.slash",
                 isSelected: !viewModel.isEnabled,
                 color: OpenEQTheme.accentAmber,
+                usesLiquidGlass: usesLiquidGlass,
                 action: { viewModel.setEnabled(false) }
             )
         }
-        .padding(3)
-        .background(.ultraThinMaterial, in: Capsule())
-        .overlay {
-            Capsule()
-                .stroke(Color.white.opacity(0.16), lineWidth: 0.8)
-        }
-        .shadow(color: Color.black.opacity(0.24), radius: 10, y: 4)
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Equalizer state")
     }
 
+    @ViewBuilder
     private func eqStatusSegment(
         title: String,
         icon: String,
         isSelected: Bool,
         color: Color,
+        usesLiquidGlass: Bool,
         action: @escaping () -> Void
     ) -> some View {
-        Button {
+        let button = Button {
             withAnimation(.spring(response: 0.22, dampingFraction: 0.72)) {
                 action()
             }
@@ -248,18 +263,24 @@ struct MainWindowView: View {
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
-        .background {
-            if isSelected {
-                Capsule()
-                    .fill(color.opacity(0.18))
-                    .overlay {
-                        Capsule()
-                            .stroke(color.opacity(0.38), lineWidth: 0.8)
-                    }
-            }
-        }
         .accessibilityLabel(title == "ACTIVE" ? "Equalizer active" : "Equalizer bypassed")
         .accessibilityAddTraits(isSelected ? .isSelected : [])
+
+        if #available(macOS 26.0, *), usesLiquidGlass {
+            button.glassEffect(
+                isSelected ? .regular.tint(color.opacity(0.18)).interactive() : .clear.interactive(),
+                in: .capsule
+            )
+        } else {
+            button.background {
+                if isSelected {
+                    Capsule()
+                        .fill(.ultraThinMaterial)
+                        .overlay { Capsule().fill(color.opacity(0.10)) }
+                        .overlay { Capsule().stroke(color.opacity(0.28), lineWidth: 0.8) }
+                }
+            }
+        }
     }
 
     private var routingInspectorPanel: some View {
@@ -345,58 +366,7 @@ struct MainWindowView: View {
 
     @ToolbarContentBuilder private var toolbarContent: some ToolbarContent {
         ToolbarItem(placement: .navigation) {
-            HStack(spacing: 2) {
-                ForEach(MainTab.allCases) { tab in
-                    Button {
-                        withAnimation(.spring(response: 0.25, dampingFraction: 0.7)) {
-                            selectedTab = tab
-                        }
-                    } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: tab.icon)
-                                .font(.system(size: 12, weight: .semibold))
-                            if selectedTab == tab {
-                                Text(tab.title)
-                                    .font(.system(size: 12, weight: .bold))
-                            }
-                        }
-                        .foregroundStyle(selectedTab == tab ? .white : .secondary)
-                        .padding(.horizontal, selectedTab == tab ? 10 : 0)
-                        .frame(height: 30)
-                        .frame(width: selectedTab == tab ? nil : 30)
-                        .contentShape(Capsule())
-                    }
-                    .buttonStyle(.plain)
-                    .background {
-                        if selectedTab == tab {
-                            Capsule()
-                                .fill(Color.white.opacity(0.14))
-                                .overlay {
-                                    Capsule()
-                                        .stroke(Color.white.opacity(0.18), lineWidth: 0.8)
-                                }
-                        } else if hoveredTab == tab {
-                            Capsule()
-                                .fill(Color.white.opacity(0.06))
-                        }
-                    }
-                    .onHover { isHovering in
-                        hoveredTab = isHovering ? tab : nil
-                    }
-                    .help(tab.title)
-                    .accessibilityLabel(tab.title)
-                    .accessibilityAddTraits(selectedTab == tab ? .isSelected : [])
-                }
-            }
-            .padding(3)
-            .frame(height: 36)
-            .background {
-                Capsule()
-                    .fill(OpenEQTheme.recessedSlotBg)
-                    .overlay {
-                        Capsule().stroke(Color.white.opacity(0.08), lineWidth: 1)
-                    }
-            }
+            mainTabBar
         }
         if #available(macOS 26.0, *) {
             if selectedTab == .equalizer {
@@ -419,6 +389,77 @@ struct MainWindowView: View {
 
             ToolbarItem(placement: .primaryAction) {
                 resetEQButton
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var mainTabBar: some View {
+        if #available(macOS 26.0, *) {
+            GlassEffectContainer(spacing: 4) {
+                mainTabButtons(usesLiquidGlass: true)
+                    .padding(3)
+                    .frame(height: 36)
+                    .glassEffect(.regular.interactive(), in: .capsule)
+            }
+        } else {
+            mainTabButtons(usesLiquidGlass: false)
+                .padding(3)
+                .frame(height: 36)
+                .background(.ultraThinMaterial, in: Capsule())
+                .overlay { Capsule().stroke(Color.white.opacity(0.08), lineWidth: 1) }
+        }
+    }
+
+    private func mainTabButtons(usesLiquidGlass: Bool) -> some View {
+        HStack(spacing: 2) {
+            ForEach(MainTab.allCases) { tab in
+                mainTabButton(tab, usesLiquidGlass: usesLiquidGlass)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func mainTabButton(_ tab: MainTab, usesLiquidGlass: Bool) -> some View {
+        let button = Button {
+            withAnimation(.spring(response: 0.25, dampingFraction: 0.7)) {
+                selectedTab = tab
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: tab.icon)
+                    .font(.system(size: 12, weight: .semibold))
+                if selectedTab == tab {
+                    Text(tab.title)
+                        .font(.system(size: 12, weight: .bold))
+                }
+            }
+            .foregroundStyle(selectedTab == tab ? .white : .secondary)
+            .padding(.horizontal, selectedTab == tab ? 10 : 0)
+            .frame(height: 30)
+            .frame(width: selectedTab == tab ? nil : 30)
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovering in hoveredTab = isHovering ? tab : nil }
+        .help(tab.title)
+        .accessibilityLabel(tab.title)
+        .accessibilityAddTraits(selectedTab == tab ? .isSelected : [])
+
+        if #available(macOS 26.0, *), usesLiquidGlass {
+            button.glassEffect(
+                selectedTab == tab
+                    ? .regular.tint(OpenEQTheme.accentCyan.opacity(0.16)).interactive()
+                    : .clear.interactive(),
+                in: .capsule
+            )
+        } else {
+            button.background {
+                if selectedTab == tab {
+                    Capsule().fill(.ultraThinMaterial)
+                } else if hoveredTab == tab {
+                    Capsule().fill(Color.white.opacity(0.05))
+                }
             }
         }
     }

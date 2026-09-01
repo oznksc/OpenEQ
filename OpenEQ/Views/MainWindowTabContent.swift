@@ -5,6 +5,7 @@ struct MainWindowTabContent: View {
     @Bindable var viewModel: OpenEQViewModel
     let graphStore: GraphStore
     let bottomContentPadding: CGFloat
+    @State private var spectrumStyle: SpectrumVisualizationStyle = .neon
 
     @ViewBuilder
     var body: some View {
@@ -25,13 +26,14 @@ struct MainWindowTabContent: View {
             SpectrumBackdropView(
                 levels: viewModel.spectrumLevels,
                 title: viewModel.spectrumTitle,
-                isSystemAudio: viewModel.isSystemAudioVisualizationActive
+                isSystemAudio: viewModel.isSystemAudioVisualizationActive,
+                style: spectrumStyle
             )
-                .offset(y: 68)
+            .offset(y: 68)
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    EqualizerView(viewModel: viewModel)
+                    EqualizerView(viewModel: viewModel, spectrumStyle: $spectrumStyle)
                 }
                 .padding(24)
                 .padding(.bottom, bottomContentPadding)
@@ -167,13 +169,26 @@ private struct SpectrumBackdropView: View {
     let levels: SpectrumLevels
     let title: String
     let isSystemAudio: Bool
+    let style: SpectrumVisualizationStyle
 
     @State private var peakLevels = SpectrumLevels()
+    @State private var idleLevels = Self.makeIdleLevels()
+    @State private var displayedLevels = SpectrumLevels()
+    @State private var latestLevels = SpectrumLevels()
+    @State private var peakVisibility: Float = 0
+
+    private var hasLiveSignal: Bool {
+        latestLevels.contains { $0 > 0.02 }
+    }
+
+    private var targetLevels: SpectrumLevels {
+        hasLiveSignal ? latestLevels : idleLevels
+    }
 
     var body: some View {
         ZStack(alignment: .bottomLeading) {
             Canvas { context, size in
-                let count = levels.count
+                let count = displayedLevels.count
                 guard count > 0 else { return }
 
                 let gap: CGFloat = 3
@@ -182,30 +197,14 @@ private struct SpectrumBackdropView: View {
                 let usableHeight = max(1, baseline - 14)
 
                 var trace = Path()
+                var auroraArea = Path()
+                auroraArea.move(to: CGPoint(x: 0, y: baseline))
                 for index in 0..<count {
-                    let level = CGFloat(max(0, min(1, levels[index])))
+                    let level = CGFloat(max(0, min(1, displayedLevels[index])))
                     let peak = CGFloat(max(0, min(1, peakLevels[index])))
                     let x = CGFloat(index) * (barWidth + gap)
                     let height = max(2, usableHeight * level)
                     let barRect = CGRect(x: x, y: baseline - height, width: barWidth, height: height)
-
-                    context.fill(
-                        Path(roundedRect: barRect, cornerRadius: min(3, barWidth / 2)),
-                        with: .linearGradient(
-                            Gradient(colors: [
-                                OpenEQTheme.accentPurple.opacity(0.12),
-                                OpenEQTheme.accentCyan.opacity(0.50)
-                            ]),
-                            startPoint: CGPoint(x: 0, y: barRect.minY),
-                            endPoint: CGPoint(x: 0, y: barRect.maxY)
-                        )
-                    )
-
-                    let peakY = baseline - usableHeight * peak
-                    context.fill(
-                        Path(CGRect(x: x, y: peakY, width: barWidth, height: 1)),
-                        with: .color(OpenEQTheme.accentCyan.opacity(0.62))
-                    )
 
                     let tracePoint = CGPoint(x: x + barWidth / 2, y: baseline - usableHeight * (0.08 + level * 0.84))
                     if index == 0 {
@@ -213,36 +212,66 @@ private struct SpectrumBackdropView: View {
                     } else {
                         trace.addLine(to: tracePoint)
                     }
+
+                    switch style {
+                    case .neon:
+                        context.fill(
+                            Path(roundedRect: barRect, cornerRadius: min(3, barWidth / 2)),
+                            with: .linearGradient(
+                                Gradient(colors: [OpenEQTheme.accentPurple.opacity(0.12), OpenEQTheme.accentCyan.opacity(0.50)]),
+                                startPoint: CGPoint(x: 0, y: barRect.minY),
+                                endPoint: CGPoint(x: 0, y: barRect.maxY)
+                            )
+                        )
+                    case .aurora:
+                        auroraArea.addLine(to: tracePoint)
+                    case .ember:
+                        context.fill(
+                            Path(roundedRect: barRect, cornerRadius: min(5, barWidth / 2)),
+                            with: .linearGradient(
+                                Gradient(colors: [OpenEQTheme.accentAmber.opacity(0.18), Color.red.opacity(0.58)]),
+                                startPoint: CGPoint(x: 0, y: barRect.minY),
+                                endPoint: CGPoint(x: 0, y: barRect.maxY)
+                            )
+                        )
+                    }
+
+                    if style != .aurora {
+                        let peakY = baseline - usableHeight * peak
+                        context.fill(
+                            Path(CGRect(x: x, y: peakY, width: barWidth, height: 1)),
+                            with: .color(style.accentColor.opacity(Double(0.68 * peakVisibility)))
+                        )
+                    }
                 }
 
-                context.stroke(
-                    trace,
-                    with: .color(OpenEQTheme.accentCyan.opacity(0.72)),
-                    style: StrokeStyle(lineWidth: 1.2, lineJoin: .round)
-                )
+                if style == .aurora {
+                    auroraArea.addLine(to: CGPoint(x: size.width, y: baseline))
+                    auroraArea.closeSubpath()
+                    context.fill(
+                        auroraArea,
+                        with: .linearGradient(
+                            Gradient(colors: [OpenEQTheme.accentPurple.opacity(0.52), OpenEQTheme.accentCyan.opacity(0.04)]),
+                            startPoint: CGPoint(x: 0, y: 0),
+                            endPoint: CGPoint(x: 0, y: baseline)
+                        )
+                    )
+                }
+
+                context.stroke(trace, with: .color(style.accentColor.opacity(0.78)), style: StrokeStyle(lineWidth: style == .aurora ? 2 : 1.2, lineJoin: .round))
 
                 var baselinePath = Path()
                 baselinePath.move(to: CGPoint(x: 0, y: baseline))
                 baselinePath.addLine(to: CGPoint(x: size.width, y: baseline))
-                context.stroke(baselinePath, with: .color(OpenEQTheme.accentCyan.opacity(0.18)), lineWidth: 1)
+                context.stroke(baselinePath, with: .color(style.accentColor.opacity(0.2)), lineWidth: 1)
             }
-            .overlay(alignment: .top) {
-                LinearGradient(
-                    colors: [OpenEQTheme.chassisBg, OpenEQTheme.chassisBg.opacity(0)],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-                .frame(height: 150)
-                .allowsHitTesting(false)
-            }
-
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 7) {
-                    StudioLED(isOn: levels.contains(where: { $0 > 0.02 }), activeColor: OpenEQTheme.accentCyan, size: 6)
+                    StudioLED(isOn: hasLiveSignal, activeColor: style.accentColor, size: 6)
                     Text("REALTIME FFT SPECTRUM")
                         .font(.system(size: 9, weight: .bold, design: .monospaced))
                         .tracking(1.1)
-                        .foregroundStyle(OpenEQTheme.accentCyan.opacity(0.7))
+                        .foregroundStyle(style.accentColor.opacity(0.7))
                 }
                 HStack(spacing: 5) {
                     Text(title.uppercased())
@@ -257,13 +286,54 @@ private struct SpectrumBackdropView: View {
         }
         .frame(maxWidth: .infinity)
         .frame(height: 320)
-        .padding(.horizontal, 24)
         .opacity(0.8)
         .allowsHitTesting(false)
-        .onChange(of: levels) { _, newValue in
-            updatePeaks(with: newValue)
+        .onChange(of: levels, initial: true) { _, newValue in
+            latestLevels = newValue
+        }
+        .task {
+            while !Task.isCancelled {
+                smoothSpectrumStep()
+
+                do {
+                    try await Task.sleep(for: .milliseconds(33))
+                } catch {
+                    return
+                }
+            }
         }
         .accessibilityHidden(true)
+    }
+
+    private static func makeIdleLevels() -> SpectrumLevels {
+        var result = SpectrumLevels()
+
+        for index in result.indices {
+            let position = Float(index) / Float(max(1, result.count - 1))
+            let contour = 0.085 + 0.05 * sin(position * .pi * 3.4)
+            let rolloff = 0.065 * (1 - position)
+            let idleLevel = max(0.06, contour + rolloff + Float.random(in: 0.015...0.085))
+            result[index] = min(1, idleLevel * 1.3)
+        }
+
+        return result
+    }
+
+    private func smoothSpectrumStep() {
+        let target = targetLevels
+        let targetPeakVisibility: Float = hasLiveSignal ? 1 : 0
+        let peakSmoothing: Float = hasLiveSignal ? 0.2 : 0.12
+        peakVisibility += (targetPeakVisibility - peakVisibility) * peakSmoothing
+
+        for index in displayedLevels.indices {
+            let current = displayedLevels[index]
+            let smoothing: Float = target[index] > current ? 0.18 : 0.09
+            displayedLevels[index] = current + (target[index] - current) * smoothing
+        }
+
+        if hasLiveSignal {
+            updatePeaks(with: displayedLevels)
+        }
     }
 
     private func updatePeaks(with current: SpectrumLevels) {

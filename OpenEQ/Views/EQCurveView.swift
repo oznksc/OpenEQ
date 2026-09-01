@@ -30,6 +30,7 @@ struct EQCurveView: View {
     var isInteractive: Bool = true
     var spectrumLevels: SpectrumLevels = SpectrumLevels()
     var spectrumDisplayMode: SpectrumDisplayMode = .overlay
+    var fixedHeight: CGFloat? = 172
     var onSelectBand: ((EQBand.ID) -> Void)?
     var onBandChanged: ((Int, EQBand) -> Void)?
 
@@ -101,12 +102,7 @@ struct EQCurveView: View {
                 }
             }
         }
-        .frame(height: 172)
-        .background(OpenEQTheme.recessedSlotBg, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(Color.white.opacity(0.08), lineWidth: 1)
-        )
+        .frame(height: fixedHeight)
         .help(isInteractive
               ? "Drag nodes to set frequency/gain. Scroll over a node to change Q."
               : "EQ frequency response")

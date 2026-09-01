@@ -2,7 +2,10 @@ import SwiftUI
 
 struct EqualizerView: View {
     @Bindable var viewModel: OpenEQViewModel
+    @Binding var spectrumStyle: SpectrumVisualizationStyle
     @State private var spectrumDisplayMode: SpectrumDisplayMode = .backdrop
+    private let graphicCurveHeight: CGFloat = 230
+    private let graphicFadersHeight: CGFloat = 184
 
     var body: some View {
         VStack(alignment: .leading, spacing: OpenEQTheme.sectionSpacing) {
@@ -38,26 +41,20 @@ struct EqualizerView: View {
                     titleFor: { $0.title },
                     iconFor: { $0.icon }
                 )
-                .frame(width: 190)
+                .frame(width: 170)
+
+                StudioSegmentedPicker(
+                    selection: $spectrumStyle,
+                    items: SpectrumVisualizationStyle.allCases,
+                    titleFor: { $0.title },
+                    iconFor: { $0.icon }
+                )
+                .frame(width: 235)
             }
 
-            EQCurveView(
-                bands: viewModel.bands,
-                mode: viewModel.eqMode,
-                preamp: viewModel.preamp,
-                selectedBandID: viewModel.selectedBandID,
-                isInteractive: viewModel.isEnabled,
-                spectrumLevels: viewModel.spectrumLevels,
-                spectrumDisplayMode: spectrumDisplayMode,
-                onSelectBand: { viewModel.selectBand(id: $0) },
-                onBandChanged: { index, band in
-                    viewModel.updateBandFromCurve(index: index, band: band)
-                }
-            )
-            .opacity(viewModel.isEnabled ? 1 : 0.4)
-            .animation(.easeInOut(duration: 0.2), value: viewModel.isEnabled)
-
             if viewModel.eqMode == .parametric {
+                curvePanel(fixedHeight: 172)
+
                 HStack(spacing: 6) {
                     Image(systemName: "hand.tap.fill")
                         .font(.caption2)
@@ -69,14 +66,41 @@ struct EqualizerView: View {
                 .padding(.leading, 4)
 
                 ParametricEQView(viewModel: viewModel)
+                    .floatingEQSurface(cornerRadius: 16)
                     .opacity(viewModel.isEnabled ? 1 : 0.4)
                     .animation(.easeInOut(duration: 0.2), value: viewModel.isEnabled)
             } else {
-                graphicFaders
-                    .opacity(viewModel.isEnabled ? 1 : 0.4)
-                    .animation(.easeInOut(duration: 0.2), value: viewModel.isEnabled)
+                VStack(alignment: .leading, spacing: 10) {
+                    curvePanel(fixedHeight: nil)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: graphicCurveHeight)
+
+                    graphicFaders
+                        .frame(maxWidth: .infinity)
+                        .frame(height: graphicFadersHeight)
+                }
             }
         }
+    }
+
+    private func curvePanel(fixedHeight: CGFloat?) -> some View {
+        EQCurveView(
+            bands: viewModel.bands,
+            mode: viewModel.eqMode,
+            preamp: viewModel.preamp,
+            selectedBandID: viewModel.selectedBandID,
+            isInteractive: viewModel.isEnabled,
+            spectrumLevels: viewModel.spectrumLevels,
+            spectrumDisplayMode: spectrumDisplayMode,
+            fixedHeight: fixedHeight,
+            onSelectBand: { viewModel.selectBand(id: $0) },
+            onBandChanged: { index, band in
+                viewModel.updateBandFromCurve(index: index, band: band)
+            }
+        )
+        .floatingEQSurface(cornerRadius: 18)
+        .opacity(viewModel.isEnabled ? 1 : 0.4)
+        .animation(.easeInOut(duration: 0.2), value: viewModel.isEnabled)
     }
 
     private var graphicFaders: some View {
@@ -95,17 +119,14 @@ struct EqualizerView: View {
                 }
                 .padding(.horizontal, 4)
                 .padding(.vertical, 4)
+                .frame(minHeight: graphicFadersHeight - 28, alignment: .center)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .padding(10)
-        .background {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(OpenEQTheme.cardBg.opacity(0.6))
-        }
-        .overlay {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(Color.white.opacity(0.06), lineWidth: 1)
-        }
+        .floatingEQSurface(cornerRadius: 16)
+        .clipped()
+        .opacity(viewModel.isEnabled ? 1 : 0.4)
+        .animation(.easeInOut(duration: 0.2), value: viewModel.isEnabled)
     }
 
     private var preampControl: some View {
@@ -167,7 +188,7 @@ struct EqualizerView: View {
                 }
                 .frame(maxWidth: .infinity)
             }
-            .frame(width: 32, height: 124)
+            .frame(width: 32, height: 112)
 
             Text("PRE")
                 .font(.system(size: 9, weight: .bold, design: .rounded))
@@ -176,10 +197,6 @@ struct EqualizerView: View {
         }
         .frame(width: 44)
         .padding(.vertical, 6)
-        .background {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color.black.opacity(0.2))
-        }
         .onTapGesture(count: 2) {
             withAnimation(.spring(response: 0.25, dampingFraction: 0.7)) {
                 viewModel.updatePreamp(gain: 0)
@@ -278,7 +295,7 @@ struct EQBandControl: View {
                 }
                 .frame(maxWidth: .infinity)
             }
-            .frame(width: 26, height: 124)
+            .frame(width: 26, height: 112)
 
             Text(band.label)
                 .font(.system(size: 8.5, weight: .semibold, design: .monospaced))
@@ -347,7 +364,8 @@ struct TactileFaderCap: View {
 
 #Preview {
     EqualizerView(
-        viewModel: OpenEQViewModel(audioEngineController: AudioEngineController())
+        viewModel: OpenEQViewModel(audioEngineController: AudioEngineController()),
+        spectrumStyle: .constant(.neon)
     )
     .padding(24)
 }
