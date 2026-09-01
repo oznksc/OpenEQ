@@ -23,6 +23,10 @@ final class OpenEQViewModel {
     var isEnabled: Bool = true
     var isLevelMatchedAB = false
     var levelMatchGainDB: Float = 0
+    var isAutoHeadroomEnabled: Bool = false
+    var autoHeadroomCompensationDB: Float = 0
+    var activeLayerKind: EQLayerKind = .session
+    var eqLayers: [EQLayerKind: EQLayer] = EQLayer.defaultLayers()
     var graphicBandCount: GraphicBandCount = .ten
     var isVolumeBoostEnabled: Bool = false
     var isShowingSystemAudio: Bool = false
@@ -35,8 +39,10 @@ final class OpenEQViewModel {
     var systemRightRMS: Float = 0
     var systemHeadroomDB: Float = .infinity
     var systemTruePeak: Float = 0
+    var systemTruePeakDBTP: Float = -.infinity
     var systemLimiterGainReductionDB: Float = 0
     private var levelMatchEstimator = LevelMatchEstimator()
+    let historyManager = EQHistoryManager()
     
     var playbackState: AudioEngineState {
         audioEngineController.playbackState
@@ -308,7 +314,18 @@ final class OpenEQViewModel {
             self.systemRightRMS = analysis.rightRMS
             self.systemHeadroomDB = analysis.headroomDB
             self.systemTruePeak = analysis.truePeak
+            self.systemTruePeakDBTP = analysis.truePeakDBTP
             self.systemLimiterGainReductionDB = analysis.limiterGainReductionDB
+
+            if self.isLevelMatchedAB {
+                let currentRMS = max(analysis.leftRMS, analysis.rightRMS)
+                if self.isEnabled {
+                    self.levelMatchEstimator.registerActiveMeasurement(currentRMS)
+                } else {
+                    self.levelMatchEstimator.registerBypassMeasurement(currentRMS)
+                }
+                self.levelMatchGainDB = self.levelMatchEstimator.offsetDB
+            }
         }
         self.systemAudioManager.onSafetyTrip = { [weak self] in
             self?.handleSafetyTrip()
@@ -423,12 +440,78 @@ final class OpenEQViewModel {
         updateSystemEQIfNeeded()
     }
 
+    func recordSnapshotForUndo(name: String = "Edit") {
+        let snapshot = EQSnapshot(
+            name: name,
+            mode: eqMode,
+            bands: bands,
+            preamp: preamp,
+            selectedHeadphoneProfileID: selectedHeadphoneProfileID
+        )
+        historyManager.push(current: snapshot)
+    }
+
+    func undo() {
+        let current = EQSnapshot(
+            name: "Current",
+            mode: eqMode,
+            bands: bands,
+            preamp: preamp,
+            selectedHeadphoneProfileID: selectedHeadphoneProfileID
+        )
+        guard let prev = historyManager.undo(current: current) else { return }
+        applySnapshot(prev)
+    }
+
+    func redo() {
+        let current = EQSnapshot(
+            name: "Current",
+            mode: eqMode,
+            bands: bands,
+            preamp: preamp,
+            selectedHeadphoneProfileID: selectedHeadphoneProfileID
+        )
+        guard let next = historyManager.redo(current: current) else { return }
+        applySnapshot(next)
+    }
+
+    func saveSnapshotSlot(_ slot: EQSnapshotSlot) {
+        let snapshot = EQSnapshot(
+            name: "Slot \(slot.rawValue)",
+            mode: eqMode,
+            bands: bands,
+            preamp: preamp,
+            selectedHeadphoneProfileID: selectedHeadphoneProfileID
+        )
+        historyManager.saveSlot(slot, snapshot: snapshot)
+    }
+
+    func recallSnapshotSlot(_ slot: EQSnapshotSlot) {
+        guard let snapshot = historyManager.getSlot(slot) else { return }
+        recordSnapshotForUndo(name: "Recall \(slot.rawValue)")
+        applySnapshot(snapshot)
+    }
+
+    private func applySnapshot(_ snapshot: EQSnapshot) {
+        eqMode = snapshot.mode
+        bands = snapshot.bands
+        preamp = snapshot.preamp
+        selectedHeadphoneProfileID = snapshot.selectedHeadphoneProfileID
+        isPresetModified = true
+        selectedPreset = EQPreset(name: snapshot.name, mode: eqMode, bands: bands, preamp: preamp)
+        audioEngineController.applyPreset(selectedPreset)
+        updateExternalLoopbackEQIfNeeded()
+        updateSystemEQIfNeeded()
+    }
+
     func capturePresetSnapshot() {
+        recordSnapshotForUndo(name: "Manual Snapshot")
         presetSnapshot = (bands: bands, preamp: preamp)
     }
 
     func restorePresetSnapshot() {
         guard let snapshot = presetSnapshot else { return }
+        recordSnapshotForUndo(name: "Restore Snapshot")
         bands = snapshot.bands
         preamp = snapshot.preamp
         isPresetModified = true
@@ -436,6 +519,39 @@ final class OpenEQViewModel {
         audioEngineController.applyPreset(selectedPreset)
         updateExternalLoopbackEQIfNeeded()
         updateSystemEQIfNeeded()
+    }
+
+    // MARK: - Layered EQ Management
+
+    func selectLayer(_ layer: EQLayerKind) {
+        activeLayerKind = layer
+    }
+
+    func setLayerEnabled(_ layer: EQLayerKind, isEnabled: Bool) {
+        eqLayers[layer]?.isEnabled = isEnabled
+        recalculateAndApplyCompositeEQ()
+    }
+
+    func setLayerBands(_ layer: EQLayerKind, bands: [EQBand]) {
+        eqLayers[layer]?.bands = bands
+        recalculateAndApplyCompositeEQ()
+    }
+
+    func setLayerPreamp(_ layer: EQLayerKind, preamp: Float) {
+        eqLayers[layer]?.preamp = preamp
+        recalculateAndApplyCompositeEQ()
+    }
+
+    func recalculateAndApplyCompositeEQ() {
+        let composite = EQLayerComposite.compositePreset(
+            mode: eqMode,
+            layers: eqLayers,
+            activeSessionBands: bands,
+            sessionPreamp: preamp
+        )
+        audioEngineController.applyPreset(composite)
+        systemAudioManager.updateSystemAudioEQ(composite)
+        updateExternalLoopbackEQIfNeeded()
     }
 
     // MARK: - Dynamics
@@ -664,7 +780,19 @@ final class OpenEQViewModel {
         updateSystemEQIfNeeded()
     }
 
+    func setAutoHeadroom(_ enabled: Bool) {
+        isAutoHeadroomEnabled = enabled
+        recalculateAutoHeadroom()
+        updateSystemEQIfNeeded()
+    }
+
+    func recalculateAutoHeadroom() {
+        let maxBoost = bands.filter(\.isEnabled).map { max(0, $0.gain) }.max() ?? 0
+        autoHeadroomCompensationDB = isAutoHeadroomEnabled && maxBoost > 0 ? -(maxBoost + 0.5) : 0
+    }
+
     func setEnabled(_ enabled: Bool) {
+        recordSnapshotForUndo(name: enabled ? "Enable EQ" : "Bypass EQ")
         isEnabled = enabled
         // Unified bypass policy across local, system EQ, and external loopback.
         audioEngineController.setBypass(!enabled)
@@ -673,10 +801,22 @@ final class OpenEQViewModel {
         syncSystemAudioState()
     }
 
+    func toggleLevelMatchedAB() {
+        let nextState = !isEnabled
+        setEnabled(nextState)
+        if isLevelMatchedAB {
+            systemAudioManager.setSystemAudioLevelMatch(enabled: true, gainDB: levelMatchGainDB)
+        }
+    }
+
     func setLevelMatchedAB(_ enabled: Bool, gainDB: Float = 0) {
         isLevelMatchedAB = enabled
-        levelMatchGainDB = enabled ? max(-12, min(12, gainDB)) : 0
-        setEnabled(enabled)
+        if !enabled {
+            levelMatchEstimator.reset()
+            levelMatchGainDB = 0
+        } else if gainDB != 0 {
+            levelMatchGainDB = max(-12, min(12, gainDB))
+        }
         systemAudioManager.setSystemAudioLevelMatch(enabled: enabled, gainDB: levelMatchGainDB)
     }
 

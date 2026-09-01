@@ -355,14 +355,36 @@ private struct StudioRotaryKnob: View {
     }
 
     private func beginEditing() {
-        draftValue = valueText
+        if title == "FREQUENCY" {
+            draftValue = value >= 1000 ? String(format: "%.2fk", value / 1000) : String(format: "%.0f", value)
+        } else if title == "GAIN" {
+            draftValue = String(format: "%.1f", value)
+        } else if title == "Q / WIDTH" {
+            draftValue = String(format: "%.2f", value)
+        } else {
+            draftValue = valueText
+        }
         isEditing = true
     }
 
     private func commitDraft() {
-        let normalized = draftValue.replacingOccurrences(of: ",", with: ".")
-        if let parsed = Double(normalized) {
-            value = min(range.upperBound, max(range.lowerBound, parsed))
+        var raw = draftValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        raw = raw.replacingOccurrences(of: ",", with: ".")
+        raw = raw.replacingOccurrences(of: "hz", with: "")
+        raw = raw.replacingOccurrences(of: "db", with: "")
+
+        var multiplier: Double = 1.0
+        if raw.hasSuffix("k") {
+            multiplier = 1000.0
+            raw = String(raw.dropLast()).trimmingCharacters(in: .whitespaces)
+        } else if raw.hasSuffix("khz") {
+            multiplier = 1000.0
+            raw = String(raw.dropLast(3)).trimmingCharacters(in: .whitespaces)
+        }
+
+        if let parsed = Double(raw) {
+            let finalVal = parsed * multiplier
+            value = min(range.upperBound, max(range.lowerBound, finalVal))
         }
         isEditing = false
     }

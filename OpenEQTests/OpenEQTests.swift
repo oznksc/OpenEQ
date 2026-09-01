@@ -1439,4 +1439,103 @@ final class OpenEQTests: XCTestCase {
         store.disconnect(edgeID: store.document.edges[0].id)
         XCTAssertEqual(fired, 1)
     }
+
+    // MARK: - Level Match & True-Peak Tests
+
+    func testLevelMatchEstimatorConvergence() {
+        var estimator = LevelMatchEstimator()
+        XCTAssertEqual(estimator.offsetDB, 0)
+        XCTAssertFalse(estimator.isConverged)
+
+        // Active path is 6 dB louder than bypass (active = 0.2, bypass = 0.1)
+        for _ in 0..<12 {
+            _ = estimator.update(activeRMS: 0.2, bypassRMS: 0.1)
+        }
+
+        XCTAssertTrue(estimator.isConverged)
+        XCTAssertEqual(estimator.offsetDB, -6.02, accuracy: 0.5)
+    }
+
+    func testTruePeakOversamplingDetectsInterSamplePeak() {
+        let analyzer = SpectrumAnalyzer()
+        // Create an inter-sample peak signal: samples hit +0.8, -0.8 around nyquist/sub-sample
+        var samples = [Float](repeating: 0, count: 1024)
+        for i in stride(from: 0, to: 1024, by: 4) {
+            samples[i] = 0.0
+            samples[i + 1] = 0.90
+            samples[i + 2] = 0.90
+            samples[i + 3] = 0.0
+        }
+
+        let analysis = samples.withUnsafeBufferPointer { ptr in
+            analyzer.analyze(left: ptr.baseAddress!, right: nil, frameLength: 1024, sampleRate: 48_000)
+        }
+
+        XCTAssertNotNil(analysis)
+        if let analysis {
+            XCTAssertGreaterThanOrEqual(analysis.truePeak, 0.90)
+            XCTAssertGreaterThan(analysis.truePeakDBTP, -1.0)
+        }
+    }
+
+    // MARK: - Layered EQ Tests
+
+    func testLayeredEQSummation() {
+        let calBand = EQBand(frequency: 1000, gain: -2, q: 1, filterType: .parametric)
+        let targetBand = EQBand(frequency: 1000, gain: 3, q: 1, filterType: .parametric)
+        let sessionBand = EQBand(frequency: 1000, gain: 1.5, q: 1, filterType: .parametric)
+
+        var layers = EQLayer.defaultLayers()
+        layers[.calibration] = EQLayer(kind: .calibration, isEnabled: true, preamp: -1.0, bands: [calBand])
+        layers[.target] = EQLayer(kind: .target, isEnabled: true, preamp: 0.0, bands: [targetBand])
+        layers[.session] = EQLayer(kind: .session, isEnabled: true, preamp: 0.5, bands: [sessionBand])
+
+        let composite = EQLayerComposite.compositePreset(
+            mode: .parametric,
+            layers: layers,
+            activeSessionBands: [sessionBand],
+            sessionPreamp: 0.5
+        )
+
+        XCTAssertEqual(composite.bands.count, 3)
+        XCTAssertEqual(composite.preamp, -0.5, accuracy: 0.001)
+    }
+
+    // MARK: - Undo/Redo & Snapshot Slots Tests
+
+    func testEQHistoryManagerUndoRedo() {
+        let history = EQHistoryManager()
+        XCTAssertFalse(history.canUndo)
+        XCTAssertFalse(history.canRedo)
+
+        let s1 = EQSnapshot(name: "S1", mode: .graphic, bands: [], preamp: 0)
+        let s2 = EQSnapshot(name: "S2", mode: .graphic, bands: [], preamp: 2)
+        let s3 = EQSnapshot(name: "S3", mode: .graphic, bands: [], preamp: 4)
+
+        history.push(current: s1)
+        history.push(current: s2)
+        XCTAssertTrue(history.canUndo)
+
+        let restored2 = history.undo(current: s3)
+        XCTAssertEqual(restored2?.preamp, 2)
+        XCTAssertTrue(history.canRedo)
+
+        let restored3 = history.redo(current: s2)
+        XCTAssertEqual(restored3?.preamp, 4)
+    }
+
+    func testEQSnapshotSlotStorage() {
+        let history = EQHistoryManager()
+        let snapA = EQSnapshot(name: "Vocal", mode: .parametric, bands: [], preamp: -1.5)
+        history.saveSlot(.a, snapshot: snapA)
+
+        let retrieved = history.getSlot(.a)
+        XCTAssertEqual(retrieved?.name, "Vocal")
+        if let preamp = retrieved?.preamp {
+            XCTAssertEqual(preamp, -1.5, accuracy: 0.001)
+        } else {
+            XCTFail("Missing snapshot in slot A")
+        }
+        XCTAssertNil(history.getSlot(.b))
+    }
 }

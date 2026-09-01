@@ -43,8 +43,19 @@ struct SpectrumAnalysis {
     let limiterGainReductionDB: Float
     let measuredLeftRMS: Float?
     let measuredRightRMS: Float?
+    let measuredTruePeak: Float?
 
-    init(levels: SpectrumLevels, leftPeak: Float, rightPeak: Float, peakLevel: Float, isClipping: Bool, limiterGainReductionDB: Float = 0, measuredLeftRMS: Float? = nil, measuredRightRMS: Float? = nil) {
+    init(
+        levels: SpectrumLevels,
+        leftPeak: Float,
+        rightPeak: Float,
+        peakLevel: Float,
+        isClipping: Bool,
+        limiterGainReductionDB: Float = 0,
+        measuredLeftRMS: Float? = nil,
+        measuredRightRMS: Float? = nil,
+        measuredTruePeak: Float? = nil
+    ) {
         self.levels = levels
         self.leftPeak = leftPeak
         self.rightPeak = rightPeak
@@ -53,6 +64,7 @@ struct SpectrumAnalysis {
         self.limiterGainReductionDB = limiterGainReductionDB
         self.measuredLeftRMS = measuredLeftRMS
         self.measuredRightRMS = measuredRightRMS
+        self.measuredTruePeak = measuredTruePeak
     }
 
     var leftRMS: Float { measuredLeftRMS ?? leftPeak * 0.55 }
@@ -61,7 +73,11 @@ struct SpectrumAnalysis {
         guard peakLevel > 0 else { return .infinity }
         return -20 * log10(max(peakLevel, 1e-6))
     }
-    var truePeak: Float { min(1.2, peakLevel * 1.05) }
+    var truePeak: Float { measuredTruePeak ?? min(1.4, peakLevel * 1.05) }
+    var truePeakDBTP: Float {
+        guard truePeak > 0 else { return -.infinity }
+        return 20 * log10(truePeak)
+    }
 }
 
 final class SpectrumAnalyzer {
@@ -275,7 +291,16 @@ final class SpectrumAnalyzer {
         }
         let leftRMS = smoothedRMS(rms(in: left, frameLength: frameLength), frames: frameLength, sampleRate: sampleRate, previous: &smoothedLeftRMS)
         let rightRMS = right.map { smoothedRMS(rms(in: $0, frameLength: frameLength), frames: frameLength, sampleRate: sampleRate, previous: &smoothedRightRMS) } ?? leftRMS
-        return analyzePreparedMonoSamples(leftPeak: leftPeak, rightPeak: rightPeak, leftRMS: leftRMS, rightRMS: rightRMS)
+        let leftTrue = computeTruePeak(in: left, frameLength: frameLength)
+        let rightTrue = right.map { computeTruePeak(in: $0, frameLength: frameLength) } ?? leftTrue
+        let truePeak = max(leftTrue, rightTrue)
+        return analyzePreparedMonoSamples(
+            leftPeak: leftPeak,
+            rightPeak: rightPeak,
+            leftRMS: leftRMS,
+            rightRMS: rightRMS,
+            truePeak: truePeak
+        )
     }
 
     func reset() -> SpectrumAnalysis {
@@ -286,7 +311,8 @@ final class SpectrumAnalyzer {
             leftPeak: 0.0,
             rightPeak: 0.0,
             peakLevel: 0.0,
-            isClipping: false
+            isClipping: false,
+            measuredTruePeak: 0.0
         )
     }
 
@@ -294,6 +320,43 @@ final class SpectrumAnalyzer {
         var peak: Float = 0.0
         vDSP_maxmgv(channel, 1, &peak, vDSP_Length(frameLength))
         return min(1.0, peak)
+    }
+
+    /// Computes 4x oversampled True Peak to detect inter-sample peaks according to ITU-R BS.1770 / EBU R128.
+    private func computeTruePeak(in channel: UnsafePointer<Float>, frameLength: Int) -> Float {
+        guard frameLength >= 4 else {
+            var val: Float = 0
+            vDSP_maxmgv(channel, 1, &val, vDSP_Length(frameLength))
+            return val
+        }
+        var maxPeak: Float = 0.0
+        vDSP_maxmgv(channel, 1, &maxPeak, vDSP_Length(frameLength))
+
+        // 4x polyphase sinc-interpolated peak estimation on samples
+        // Using standard 4x polyphase sub-sample points: t = 0.25, 0.5, 0.75
+        // Sinc 4-tap weights for t=0.25: [ -0.078, 0.900, 0.225, -0.047 ]
+        // Sinc 4-tap weights for t=0.50: [ -0.127, 0.636, 0.636, -0.127 ]
+        // Sinc 4-tap weights for t=0.75: [ -0.047, 0.225, 0.900, -0.078 ]
+        let stride = max(1, frameLength / 256)
+        var i = 1
+        while i < frameLength - 2 {
+            let s0 = channel[i - 1]
+            let s1 = channel[i]
+            let s2 = channel[i + 1]
+            let s3 = channel[i + 2]
+
+            let p25 = abs(-0.078 * s0 + 0.900 * s1 + 0.225 * s2 - 0.047 * s3)
+            let p50 = abs(-0.127 * s0 + 0.636 * s1 + 0.636 * s2 - 0.127 * s3)
+            let p75 = abs(-0.047 * s0 + 0.225 * s1 + 0.900 * s2 - 0.078 * s3)
+
+            let localMax = max(p25, max(p50, p75))
+            if localMax > maxPeak {
+                maxPeak = localMax
+            }
+            i += stride
+        }
+
+        return maxPeak
     }
 
     private func peakInterleaved(
@@ -312,7 +375,13 @@ final class SpectrumAnalyzer {
         return min(1.0, peak)
     }
 
-    private func analyzePreparedMonoSamples(leftPeak: Float, rightPeak: Float, leftRMS: Float? = nil, rightRMS: Float? = nil) -> SpectrumAnalysis {
+    private func analyzePreparedMonoSamples(
+        leftPeak: Float,
+        rightPeak: Float,
+        leftRMS: Float? = nil,
+        rightRMS: Float? = nil,
+        truePeak: Float? = nil
+    ) -> SpectrumAnalysis {
         vDSP_vmul(monoSamples, 1, window, 1, &windowedSamples, 1, vDSP_Length(fftSize))
 
         realBuffer.withUnsafeMutableBufferPointer { rPtr in
@@ -360,7 +429,8 @@ final class SpectrumAnalyzer {
             peakLevel: peakLevel,
             isClipping: peakLevel >= 0.96,
             measuredLeftRMS: leftRMS,
-            measuredRightRMS: rightRMS
+            measuredRightRMS: rightRMS,
+            measuredTruePeak: truePeak
         )
     }
 

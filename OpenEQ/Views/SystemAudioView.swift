@@ -243,6 +243,20 @@ struct SystemAudioView: View {
             }
 
             Toggle(isOn: Binding(
+                get: { viewModel.isAutoHeadroomEnabled },
+                set: { viewModel.setAutoHeadroom($0) }
+            )) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Auto Headroom")
+                    if viewModel.isAutoHeadroomEnabled, viewModel.autoHeadroomCompensationDB != 0 {
+                        Text(String(format: "Applied Preamp Trim: %.1f dB", viewModel.autoHeadroomCompensationDB))
+                            .font(.caption2)
+                            .foregroundStyle(OpenEQTheme.accentCyan)
+                    }
+                }
+            }
+
+            Toggle(isOn: Binding(
                 get: { viewModel.feedbackProtectionEnabled },
                 set: { viewModel.setFeedbackProtectionEnabled($0) }
             )) {

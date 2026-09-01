@@ -320,7 +320,40 @@ struct PlayerControlsView: View {
     }
 
     private var volume: some View {
-        volumeControlButton
+        HStack(spacing: 6) {
+            levelMatchABControl
+            volumeControlButton
+        }
+    }
+
+    private var levelMatchABControl: some View {
+        Button {
+            viewModel.setLevelMatchedAB(!viewModel.isLevelMatchedAB)
+        } label: {
+            HStack(spacing: 4) {
+                StudioLED(
+                    isOn: viewModel.isLevelMatchedAB,
+                    activeColor: OpenEQTheme.accentCyan,
+                    size: 6
+                )
+                Text(viewModel.isLevelMatchedAB
+                    ? (viewModel.levelMatchGainDB != 0 ? String(format: "A/B %+.1fdB", viewModel.levelMatchGainDB) : "A/B Match")
+                    : "A/B")
+                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+            }
+            .foregroundStyle(viewModel.isLevelMatchedAB ? OpenEQTheme.accentCyan : .secondary)
+            .padding(.horizontal, 7)
+            .frame(height: 24)
+            .background(
+                viewModel.isLevelMatchedAB ? OpenEQTheme.accentCyan.opacity(0.14) : Color.clear,
+                in: Capsule()
+            )
+            .overlay {
+                Capsule().stroke(viewModel.isLevelMatchedAB ? OpenEQTheme.accentCyan.opacity(0.4) : Color.white.opacity(0.1), lineWidth: 0.8)
+            }
+        }
+        .buttonStyle(.plain)
+        .help("Level-Matched A/B Comparison: Automatically equalizes active vs bypassed loudness to prevent perceptual bias.")
     }
 
     private func errorBanner(_ message: String) -> some View {

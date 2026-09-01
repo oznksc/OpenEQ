@@ -19,7 +19,13 @@ struct EqualizerView: View {
 
                 activeHeadphoneBadge
 
+                autoHeadroomBadge
+
                 Spacer(minLength: 8)
+
+                undoRedoSnapshotBar
+
+                layerSelectionBar
 
                 spectrumDisplayButton
 
@@ -173,6 +179,135 @@ struct EqualizerView: View {
             .padding(.vertical, 6)
             .background(OpenEQTheme.accentCyan.opacity(0.08), in: Capsule())
         }
+    }
+
+    @ViewBuilder
+    private var autoHeadroomBadge: some View {
+        Button {
+            viewModel.setAutoHeadroom(!viewModel.isAutoHeadroomEnabled)
+        } label: {
+            HStack(spacing: 5) {
+                StudioLED(
+                    isOn: viewModel.isAutoHeadroomEnabled,
+                    activeColor: OpenEQTheme.accentCyan,
+                    size: 6
+                )
+                Text(viewModel.isAutoHeadroomEnabled
+                    ? (viewModel.autoHeadroomCompensationDB != 0
+                        ? String(format: "Auto HR: %.1f dB", viewModel.autoHeadroomCompensationDB)
+                        : "Auto HR: Active")
+                    : "Auto HR: Off")
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+            }
+            .foregroundStyle(viewModel.isAutoHeadroomEnabled ? OpenEQTheme.accentCyan : .secondary)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .background(
+                viewModel.isAutoHeadroomEnabled
+                    ? OpenEQTheme.accentCyan.opacity(0.10)
+                    : OpenEQTheme.recessedSlotBg,
+                in: Capsule()
+            )
+            .overlay {
+                Capsule().stroke(
+                    viewModel.isAutoHeadroomEnabled
+                        ? OpenEQTheme.accentCyan.opacity(0.3)
+                        : Color.white.opacity(0.08),
+                    lineWidth: 0.8
+                )
+            }
+        }
+        .buttonStyle(.plain)
+        .help("Auto Headroom: Automatically applies anti-clipping preamp attenuation for positive EQ boosts.")
+    }
+
+    private var undoRedoSnapshotBar: some View {
+        HStack(spacing: 3) {
+            Button {
+                viewModel.undo()
+            } label: {
+                Image(systemName: "arrow.uturn.backward")
+                    .font(.system(size: 10, weight: .bold))
+                    .frame(width: 22, height: 22)
+            }
+            .buttonStyle(.plain)
+            .disabled(!viewModel.historyManager.canUndo)
+            .opacity(viewModel.historyManager.canUndo ? 1.0 : 0.35)
+            .help("Undo (⌘Z)")
+
+            Button {
+                viewModel.redo()
+            } label: {
+                Image(systemName: "arrow.uturn.forward")
+                    .font(.system(size: 10, weight: .bold))
+                    .frame(width: 22, height: 22)
+            }
+            .buttonStyle(.plain)
+            .disabled(!viewModel.historyManager.canRedo)
+            .opacity(viewModel.historyManager.canRedo ? 1.0 : 0.35)
+            .help("Redo (⇧⌘Z)")
+
+            Divider()
+                .frame(height: 14)
+                .opacity(0.2)
+
+            ForEach(EQSnapshotSlot.allCases) { slot in
+                Button {
+                    if NSEvent.modifierFlags.contains(.option) {
+                        viewModel.saveSnapshotSlot(slot)
+                    } else {
+                        viewModel.recallSnapshotSlot(slot)
+                    }
+                } label: {
+                    Text(slot.rawValue)
+                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                        .foregroundStyle(viewModel.historyManager.getSlot(slot) != nil ? OpenEQTheme.accentCyan : .secondary)
+                        .frame(width: 20, height: 22)
+                        .background {
+                            if viewModel.historyManager.getSlot(slot) != nil {
+                                RoundedRectangle(cornerRadius: 4)
+                                    .fill(OpenEQTheme.accentCyan.opacity(0.12))
+                            }
+                        }
+                }
+                .buttonStyle(.plain)
+                .help("Slot \(slot.rawValue) — Click to Recall, Option-Click to Store Snapshot")
+            }
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 3)
+        .background(OpenEQTheme.recessedSlotBg, in: Capsule())
+        .overlay { Capsule().stroke(Color.white.opacity(0.08), lineWidth: 0.8) }
+    }
+
+    private var layerSelectionBar: some View {
+        HStack(spacing: 2) {
+            ForEach(EQLayerKind.allCases) { layerKind in
+                Button {
+                    viewModel.selectLayer(layerKind)
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: layerKind.icon)
+                            .font(.system(size: 9, weight: .semibold))
+                        Text(layerKind.title)
+                            .font(.system(size: 10, weight: viewModel.activeLayerKind == layerKind ? .bold : .medium))
+                    }
+                    .foregroundStyle(viewModel.activeLayerKind == layerKind ? .primary : .secondary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background {
+                        if viewModel.activeLayerKind == layerKind {
+                            Capsule().fill(Color.white.opacity(0.12))
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+                .help("\(layerKind.title): \(layerKind.subtitle)")
+            }
+        }
+        .padding(2.5)
+        .background(OpenEQTheme.recessedSlotBg, in: Capsule())
+        .overlay { Capsule().stroke(Color.white.opacity(0.08), lineWidth: 0.8) }
     }
 
     private func curvePanel(fixedHeight: CGFloat?) -> some View {

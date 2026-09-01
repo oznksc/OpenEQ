@@ -374,7 +374,7 @@ final class SystemAudioDSPState {
     private var linkedLimiter = LinkedLookAheadLimiterState()
     var isBypassed = false
     var isEmergencyMuted = false
-    var autoHeadroomEnabled = true
+    var autoHeadroomEnabled = false
     var levelMatchEnabled = false
     private(set) var levelMatchGainDB: Float = 0
     private(set) var autoHeadroomDB: Float = 0
@@ -388,7 +388,7 @@ final class SystemAudioDSPState {
             .filter { $0.isEnabled }
             .map { max(0, $0.gain) }
             .max() ?? 0
-        autoHeadroomDB = autoHeadroomEnabled ? -(positiveBoost + 0.5) : 0
+        autoHeadroomDB = autoHeadroomEnabled && positiveBoost > 0 ? -(positiveBoost + 0.5) : 0
         let effectivePreampDB = preset.preamp + autoHeadroomDB
         let preampTarget = pow(10, effectivePreampDB / 20)
         leftControl.configureTiming(sampleRate: safeSampleRate)
