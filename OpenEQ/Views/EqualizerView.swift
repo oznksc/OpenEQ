@@ -320,12 +320,15 @@ struct EQBandControl: View {
 
     @State private var isDragging = false
     @State private var isHovered = false
+    @State private var isEditingGain = false
+    @State private var gainText = ""
 
     var body: some View {
         VStack(spacing: 6) {
-            Text(String(format: "%+.0f", gain))
+            Text(String(format: "%+.1f", gain))
                 .font(.system(size: 8.5, weight: .bold, design: .monospaced))
                 .foregroundStyle(gain == 0 ? Color.secondary.opacity(0.8) : (gain > 0 ? OpenEQTheme.accentCyan : OpenEQTheme.accentAmber))
+                .onTapGesture(count: 2) { gainText = String(format: "%.1f", gain); isEditingGain = true }
 
             GeometryReader { geometry in
                 let height = geometry.size.height
@@ -408,6 +411,15 @@ struct EQBandControl: View {
             @unknown default:
                 break
             }
+        }
+        .popover(isPresented: $isEditingGain) {
+            TextField("Gain dB", text: $gainText, onCommit: {
+                if let value = Float(gainText) { onGainChanged(max(EQBand.gainRange.lowerBound, min(EQBand.gainRange.upperBound, value))) }
+                isEditingGain = false
+            })
+            .textFieldStyle(.roundedBorder)
+            .padding(10)
+            .frame(width: 120)
         }
     }
 }

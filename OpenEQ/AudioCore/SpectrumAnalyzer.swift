@@ -40,6 +40,28 @@ struct SpectrumAnalysis {
     let rightPeak: Float
     let peakLevel: Float
     let isClipping: Bool
+    let limiterGainReductionDB: Float
+    let measuredLeftRMS: Float?
+    let measuredRightRMS: Float?
+
+    init(levels: SpectrumLevels, leftPeak: Float, rightPeak: Float, peakLevel: Float, isClipping: Bool, limiterGainReductionDB: Float = 0, measuredLeftRMS: Float? = nil, measuredRightRMS: Float? = nil) {
+        self.levels = levels
+        self.leftPeak = leftPeak
+        self.rightPeak = rightPeak
+        self.peakLevel = peakLevel
+        self.isClipping = isClipping
+        self.limiterGainReductionDB = limiterGainReductionDB
+        self.measuredLeftRMS = measuredLeftRMS
+        self.measuredRightRMS = measuredRightRMS
+    }
+
+    var leftRMS: Float { measuredLeftRMS ?? leftPeak * 0.55 }
+    var rightRMS: Float { measuredRightRMS ?? rightPeak * 0.55 }
+    var headroomDB: Float {
+        guard peakLevel > 0 else { return .infinity }
+        return -20 * log10(max(peakLevel, 1e-6))
+    }
+    var truePeak: Float { min(1.2, peakLevel * 1.05) }
 }
 
 final class SpectrumAnalyzer {
@@ -61,6 +83,8 @@ final class SpectrumAnalyzer {
     private var imagBuffer: [Float]
     private var binRanges: [(start: Int, end: Int)] = []
     private var cachedSampleRate: Double = 0
+    private var smoothedLeftRMS: Float = 0
+    private var smoothedRightRMS: Float = 0
 
     init() {
         self.log2n = vDSP_Length(10) // log2(1024) = 10
@@ -95,6 +119,10 @@ final class SpectrumAnalyzer {
         let channelCount = max(1, min(Int(buffer.format.channelCount), 2))
         let leftPeak = peak(in: channelData[0], frameLength: frameLength)
         let rightPeak = channelCount > 1 ? peak(in: channelData[1], frameLength: frameLength) : leftPeak
+        let leftRMS = smoothedRMS(rms(in: channelData[0], frameLength: frameLength), frames: frameLength, sampleRate: buffer.format.sampleRate, previous: &smoothedLeftRMS)
+        let rightRMS = channelCount > 1
+            ? smoothedRMS(rms(in: channelData[1], frameLength: frameLength), frames: frameLength, sampleRate: buffer.format.sampleRate, previous: &smoothedRightRMS)
+            : leftRMS
         let peakLevel = max(leftPeak, rightPeak)
 
         if channelCount > 1 {
@@ -152,8 +180,23 @@ final class SpectrumAnalyzer {
             leftPeak: leftPeak,
             rightPeak: rightPeak,
             peakLevel: peakLevel,
-            isClipping: peakLevel >= 0.96
+            isClipping: peakLevel >= 0.96,
+            measuredLeftRMS: leftRMS,
+            measuredRightRMS: rightRMS
         )
+    }
+
+    private func rms(in samples: UnsafePointer<Float>, frameLength: Int) -> Float {
+        var meanSquare: Float = 0
+        vDSP_measqv(samples, 1, &meanSquare, vDSP_Length(frameLength))
+        return sqrt(max(0, meanSquare))
+    }
+
+    private func smoothedRMS(_ value: Float, frames: Int, sampleRate: Double, previous: inout Float) -> Float {
+        let duration = max(1.0 / max(sampleRate, 1), Double(frames) / max(sampleRate, 1))
+        let alpha = Float(1 - exp(-duration / 0.3))
+        previous += (value - previous) * alpha
+        return previous
     }
 
     /// Converts a Core Audio input buffer into the same analysis used by AVAudioEngine taps.
@@ -230,7 +273,9 @@ final class SpectrumAnalyzer {
                 destination.baseAddress?.update(from: left, count: fftSize)
             }
         }
-        return analyzePreparedMonoSamples(leftPeak: leftPeak, rightPeak: rightPeak)
+        let leftRMS = smoothedRMS(rms(in: left, frameLength: frameLength), frames: frameLength, sampleRate: sampleRate, previous: &smoothedLeftRMS)
+        let rightRMS = right.map { smoothedRMS(rms(in: $0, frameLength: frameLength), frames: frameLength, sampleRate: sampleRate, previous: &smoothedRightRMS) } ?? leftRMS
+        return analyzePreparedMonoSamples(leftPeak: leftPeak, rightPeak: rightPeak, leftRMS: leftRMS, rightRMS: rightRMS)
     }
 
     func reset() -> SpectrumAnalysis {
@@ -267,7 +312,7 @@ final class SpectrumAnalyzer {
         return min(1.0, peak)
     }
 
-    private func analyzePreparedMonoSamples(leftPeak: Float, rightPeak: Float) -> SpectrumAnalysis {
+    private func analyzePreparedMonoSamples(leftPeak: Float, rightPeak: Float, leftRMS: Float? = nil, rightRMS: Float? = nil) -> SpectrumAnalysis {
         vDSP_vmul(monoSamples, 1, window, 1, &windowedSamples, 1, vDSP_Length(fftSize))
 
         realBuffer.withUnsafeMutableBufferPointer { rPtr in
@@ -313,7 +358,9 @@ final class SpectrumAnalyzer {
             leftPeak: leftPeak,
             rightPeak: rightPeak,
             peakLevel: peakLevel,
-            isClipping: peakLevel >= 0.96
+            isClipping: peakLevel >= 0.96,
+            measuredLeftRMS: leftRMS,
+            measuredRightRMS: rightRMS
         )
     }
 

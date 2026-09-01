@@ -225,6 +225,10 @@ final class SystemAudioManager {
         systemAudioEQEngine.updateEQ(preset)
     }
 
+    func setSystemAudioLevelMatch(enabled: Bool, gainDB: Float) {
+        systemAudioEQEngine.setLevelMatched(enabled, gainDB: gainDB)
+    }
+
     func setSystemAudioBypassed(_ bypassed: Bool) {
         isSystemAudioBypassed = bypassed
         guard mode == .systemEQ else { return }

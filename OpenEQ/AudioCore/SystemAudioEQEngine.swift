@@ -200,6 +200,13 @@ final class SystemAudioEQEngine {
         }
     }
 
+    func setLevelMatched(_ enabled: Bool, gainDB: Float) {
+        ioQueue.async { [weak self] in
+            self?.dspState.levelMatchEnabled = enabled
+            self?.dspState.setLevelMatchGainDB(gainDB)
+        }
+    }
+
     func setFeedbackProtectionEnabled(_ enabled: Bool) {
         feedbackProtectionEnabled = enabled
         if !enabled {
@@ -763,7 +770,15 @@ final class SystemAudioEQEngine {
             sampleRate: rate
         )
         if let result {
-            DispatchQueue.main.async { [weak self] in self?.onAnalysis?(result) }
+            let metered = SpectrumAnalysis(
+                levels: result.levels,
+                leftPeak: result.leftPeak,
+                rightPeak: result.rightPeak,
+                peakLevel: result.peakLevel,
+                isClipping: result.isClipping,
+                limiterGainReductionDB: dspState.limiterGainReductionDB
+            )
+            DispatchQueue.main.async { [weak self] in self?.onAnalysis?(metered) }
         }
     }
 

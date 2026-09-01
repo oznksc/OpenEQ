@@ -29,7 +29,15 @@ struct MainWindowTabContent: View {
                 levels: viewModel.spectrumLevels,
                 title: viewModel.spectrumTitle,
                 isSystemAudio: viewModel.isSystemAudioVisualizationActive,
-                style: spectrumStyle
+                style: spectrumStyle,
+                leftLevel: viewModel.leftLevel,
+                rightLevel: viewModel.rightLevel,
+                peakLevel: viewModel.peakLevel,
+                leftRMS: viewModel.systemLeftRMS,
+                rightRMS: viewModel.systemRightRMS,
+                headroomDB: viewModel.systemHeadroomDB,
+                limiterGainReductionDB: viewModel.systemLimiterGainReductionDB,
+                truePeak: viewModel.systemTruePeak
             )
             .offset(y: 68)
 
@@ -273,6 +281,14 @@ private struct SpectrumBackdropView: View {
     let isSystemAudio: Bool
     let style: SpectrumVisualizationStyle
     var height: CGFloat = 320
+    var leftLevel: Float = 0
+    var rightLevel: Float = 0
+    var peakLevel: Float = 0
+    var leftRMS: Float = 0
+    var rightRMS: Float = 0
+    var headroomDB: Float = .infinity
+    var limiterGainReductionDB: Float = 0
+    var truePeak: Float = 0
 
     @State private var peakLevels = SpectrumLevels()
     @State private var idleLevels = Self.makeIdleLevels()
@@ -290,6 +306,9 @@ private struct SpectrumBackdropView: View {
 
     var body: some View {
         ZStack(alignment: .bottomLeading) {
+            LevelMeterView(leftLevel: leftLevel, rightLevel: rightLevel, peakLevel: peakLevel, leftRMS: leftRMS, rightRMS: rightRMS, headroomDB: headroomDB, limiterGainReductionDB: limiterGainReductionDB, truePeak: truePeak)
+                .padding(12)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
             if style == .globe {
                 SpectrumGlobeView(levels: displayedLevels)
                     .frame(width: 270, height: 270)

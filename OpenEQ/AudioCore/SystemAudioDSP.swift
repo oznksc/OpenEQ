@@ -288,6 +288,11 @@ private struct LookAheadLimiterState {
         }
     }
 
+    var gainReductionDB: Float {
+        guard gain > 0 else { return -.infinity }
+        return 20 * log10(gain)
+    }
+
     mutating func reset() {
         delayLine.withUnsafeMutableBufferPointer { $0.initialize(repeating: 0) }
         writeIndex = 0
@@ -345,6 +350,11 @@ private struct LinkedLookAheadLimiterState {
         }
     }
 
+    var gainReductionDB: Float {
+        guard gain > 0 else { return -.infinity }
+        return 20 * log10(gain)
+    }
+
     mutating func reset() {
         leftDelay.withUnsafeMutableBufferPointer { $0.initialize(repeating: 0) }
         rightDelay.withUnsafeMutableBufferPointer { $0.initialize(repeating: 0) }
@@ -364,12 +374,23 @@ final class SystemAudioDSPState {
     private var linkedLimiter = LinkedLookAheadLimiterState()
     var isBypassed = false
     var isEmergencyMuted = false
+    var autoHeadroomEnabled = true
+    var levelMatchEnabled = false
+    private(set) var levelMatchGainDB: Float = 0
+    private(set) var autoHeadroomDB: Float = 0
+    private(set) var limiterGainReductionDB: Float = 0
 
     func configure(_ preset: EQPreset, sampleRate: Double) {
         let safeSampleRate = sampleRate.isFinite && sampleRate > 0 ? sampleRate : 48_000
         let filterTransitionFrames = max(1, Int((512 * safeSampleRate / 48_000).rounded()))
         let preampTransitionFrames = max(1, Int((256 * safeSampleRate / 48_000).rounded()))
-        let preampTarget = pow(10, preset.preamp / 20)
+        let positiveBoost = preset.bands
+            .filter { $0.isEnabled }
+            .map { max(0, $0.gain) }
+            .max() ?? 0
+        autoHeadroomDB = autoHeadroomEnabled ? -(positiveBoost + 0.5) : 0
+        let effectivePreampDB = preset.preamp + autoHeadroomDB
+        let preampTarget = pow(10, effectivePreampDB / 20)
         leftControl.configureTiming(sampleRate: safeSampleRate)
         rightControl.configureTiming(sampleRate: safeSampleRate)
         leftLimiter.configure(sampleRate: safeSampleRate)
@@ -392,10 +413,17 @@ final class SystemAudioDSPState {
         linkedLimiter.reset()
         isBypassed = false
         isEmergencyMuted = false
+        autoHeadroomDB = 0
+        limiterGainReductionDB = 0
+        levelMatchGainDB = 0
         leftControl.reset()
         rightControl.reset()
         biquadCascade.updateCoefficients(Array(repeating: .identity, count: Self.sectionCount))
         biquadCascade.reset()
+    }
+
+    func setLevelMatchGainDB(_ value: Float) {
+        levelMatchGainDB = max(-12, min(12, value.isFinite ? value : 0))
     }
 
     func process(_ samples: UnsafeMutablePointer<Float>, frames: Int, channel: Int) {
@@ -412,10 +440,17 @@ final class SystemAudioDSPState {
             }
         }
 
+        if levelMatchEnabled, abs(levelMatchGainDB) > 0.0001 {
+            var gain = pow(10, levelMatchGainDB / 20)
+            vDSP_vsmul(samples, 1, &gain, samples, 1, vDSP_Length(frames))
+        }
+
         if channel == 0 {
             leftLimiter.process(samples, frames: frames)
+            limiterGainReductionDB = leftLimiter.gainReductionDB
         } else {
             rightLimiter.process(samples, frames: frames)
+            limiterGainReductionDB = rightLimiter.gainReductionDB
         }
     }
 
@@ -434,7 +469,13 @@ final class SystemAudioDSPState {
             leftControl.process(left, frames: frames, channel: 0, cascade: biquadCascade)
             rightControl.process(right, frames: frames, channel: 1, cascade: biquadCascade)
         }
+        if levelMatchEnabled, abs(levelMatchGainDB) > 0.0001 {
+            var gain = pow(10, levelMatchGainDB / 20)
+            vDSP_vsmul(left, 1, &gain, left, 1, vDSP_Length(frames))
+            vDSP_vsmul(right, 1, &gain, right, 1, vDSP_Length(frames))
+        }
         linkedLimiter.process(left: left, right: right, frames: frames)
+        limiterGainReductionDB = linkedLimiter.gainReductionDB
     }
 
     static func limiterLatencyFrames(for sampleRate: Double) -> Int {

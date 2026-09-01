@@ -19,6 +19,20 @@ struct PresetPanelView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
+                Text(viewModel.selectedPreset.name)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                if viewModel.isPresetModified {
+                    Text("MODIFIED")
+                        .font(.system(size: 9, weight: .bold, design: .monospaced))
+                        .foregroundStyle(OpenEQTheme.accentAmber)
+                    Button("Restore Snapshot") { viewModel.restorePresetSnapshot() }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                }
+                Spacer()
+            }
+            HStack(spacing: 8) {
                 TextField("Save current curve as…", text: $newPresetName)
                     .textFieldStyle(.plain)
                     .font(.system(size: 11, weight: .medium))
@@ -149,4 +163,3 @@ struct PresetPanelView: View {
         newPresetName = ""
     }
 }
-

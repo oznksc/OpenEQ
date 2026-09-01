@@ -21,6 +21,8 @@ final class OpenEQViewModel {
     var preamp: Float
     var errorMessage: String?
     var isEnabled: Bool = true
+    var isLevelMatchedAB = false
+    var levelMatchGainDB: Float = 0
     var graphicBandCount: GraphicBandCount = .ten
     var isVolumeBoostEnabled: Bool = false
     var isShowingSystemAudio: Bool = false
@@ -29,6 +31,12 @@ final class OpenEQViewModel {
     var systemRightLevel: Float = 0
     var systemPeakLevel: Float = 0
     var systemIsClipping = false
+    var systemLeftRMS: Float = 0
+    var systemRightRMS: Float = 0
+    var systemHeadroomDB: Float = .infinity
+    var systemTruePeak: Float = 0
+    var systemLimiterGainReductionDB: Float = 0
+    private var levelMatchEstimator = LevelMatchEstimator()
     
     var playbackState: AudioEngineState {
         audioEngineController.playbackState
@@ -121,6 +129,8 @@ final class OpenEQViewModel {
     var presets: [EQPreset]
     var userPresets: [EQPreset] = []
     var selectedPreset: EQPreset
+    private(set) var isPresetModified = false
+    private var presetSnapshot: (bands: [EQBand], preamp: Float)?
     var volume: Double {
         didSet { audioEngineController.setVolume(volume) }
     }
@@ -294,6 +304,11 @@ final class OpenEQViewModel {
             self.systemRightLevel = analysis.rightPeak
             self.systemPeakLevel = analysis.peakLevel
             self.systemIsClipping = analysis.isClipping
+            self.systemLeftRMS = analysis.leftRMS
+            self.systemRightRMS = analysis.rightRMS
+            self.systemHeadroomDB = analysis.headroomDB
+            self.systemTruePeak = analysis.truePeak
+            self.systemLimiterGainReductionDB = analysis.limiterGainReductionDB
         }
         self.systemAudioManager.onSafetyTrip = { [weak self] in
             self?.handleSafetyTrip()
@@ -398,11 +413,27 @@ final class OpenEQViewModel {
     func updateBandFromCurve(index: Int, band: EQBand) {
         guard index >= 0, index < bands.count else { return }
         bands[index] = band
+        isPresetModified = true
         selectedBandID = band.id
         commitActiveBandsAsCustom()
         // Full mode apply keeps graphic/parametric band counts in sync with the engine.
         audioEngineController.applyMode(eqMode, bands: bands)
         audioEngineController.setPreampGain(preamp)
+        updateExternalLoopbackEQIfNeeded()
+        updateSystemEQIfNeeded()
+    }
+
+    func capturePresetSnapshot() {
+        presetSnapshot = (bands: bands, preamp: preamp)
+    }
+
+    func restorePresetSnapshot() {
+        guard let snapshot = presetSnapshot else { return }
+        bands = snapshot.bands
+        preamp = snapshot.preamp
+        isPresetModified = true
+        selectedPreset = EQPreset(name: "Custom", mode: eqMode, bands: bands, preamp: preamp)
+        audioEngineController.applyPreset(selectedPreset)
         updateExternalLoopbackEQIfNeeded()
         updateSystemEQIfNeeded()
     }
@@ -642,6 +673,28 @@ final class OpenEQViewModel {
         syncSystemAudioState()
     }
 
+    func setLevelMatchedAB(_ enabled: Bool, gainDB: Float = 0) {
+        isLevelMatchedAB = enabled
+        levelMatchGainDB = enabled ? max(-12, min(12, gainDB)) : 0
+        setEnabled(enabled)
+        systemAudioManager.setSystemAudioLevelMatch(enabled: enabled, gainDB: levelMatchGainDB)
+    }
+
+    func updateLevelMatch(activeRMS: Float, bypassRMS: Float) {
+        let gain = levelMatchEstimator.update(activeRMS: activeRMS, bypassRMS: bypassRMS)
+        levelMatchGainDB = gain
+        systemAudioManager.setSystemAudioLevelMatch(enabled: isLevelMatchedAB, gainDB: gain)
+    }
+
+    func updateBandNumerically(index: Int, frequency: Float, gain: Float, q: Float) {
+        guard bands.indices.contains(index) else { return }
+        var band = bands[index]
+        band.frequency = frequency
+        band.gain = gain
+        band.q = q
+        updateBandFromCurve(index: index, band: band)
+    }
+
     func setGraphicBandCount(_ count: GraphicBandCount) {
         guard count != graphicBandCount, eqMode == .graphic else {
             graphicBandCount = count
@@ -744,6 +797,8 @@ final class OpenEQViewModel {
         bands = preset.bands
         cacheActiveBands()
         preamp = preset.preamp
+        isPresetModified = false
+        capturePresetSnapshot()
         audioEngineController.applyPreset(preset)
         rememberRecentPreset(preset)
         updateExternalLoopbackEQIfNeeded()
