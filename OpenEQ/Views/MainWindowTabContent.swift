@@ -49,7 +49,20 @@ struct MainWindowTabContent: View {
     }
 
     private var settingsPage: some View {
-        VStack(alignment: .leading, spacing: 20) {
+        GeometryReader { geometry in
+            ZStack(alignment: .bottom) {
+                SettingsSpectrumDemo(style: spectrumStyle)
+                    .frame(height: geometry.size.height * 0.5)
+                    .mask {
+                        LinearGradient(
+                            colors: [.clear, .black.opacity(0.82), .black],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    }
+                    .allowsHitTesting(false)
+
+                VStack(alignment: .leading, spacing: 20) {
             HStack(spacing: 8) {
                 Image(systemName: "gearshape.fill")
                     .font(.title3)
@@ -105,10 +118,12 @@ struct MainWindowTabContent: View {
             .padding(18)
             .studioCard(cornerRadius: 14)
         }
-        .padding(24)
-        .padding(.bottom, bottomContentPadding)
-        .frame(maxWidth: 760, maxHeight: .infinity, alignment: .topLeading)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .padding(24)
+                .padding(.bottom, bottomContentPadding)
+                .frame(maxWidth: 760, maxHeight: .infinity, alignment: .topLeading)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            }
+        }
         .background(OpenEQTheme.chassisBg)
     }
 
@@ -236,6 +251,7 @@ private struct SpectrumBackdropView: View {
     let title: String
     let isSystemAudio: Bool
     let style: SpectrumVisualizationStyle
+    var height: CGFloat = 320
 
     @State private var peakLevels = SpectrumLevels()
     @State private var idleLevels = Self.makeIdleLevels()
@@ -394,7 +410,7 @@ private struct SpectrumBackdropView: View {
             .padding(.bottom, 25)
         }
         .frame(maxWidth: .infinity)
-        .frame(height: 320)
+        .frame(height: height)
         .opacity(0.8)
         .allowsHitTesting(false)
         .onChange(of: levels, initial: true) { _, newValue in
@@ -457,6 +473,49 @@ private struct SpectrumBackdropView: View {
             } else {
                 peakLevels[index] = max(0, peakLevels[index] - 0.028)
             }
+        }
+    }
+}
+
+private struct SettingsSpectrumDemo: View {
+    let style: SpectrumVisualizationStyle
+
+    @State private var levels = SpectrumLevels()
+    @State private var phase: Float = 0
+
+    var body: some View {
+        GeometryReader { geometry in
+            SpectrumBackdropView(
+                levels: levels,
+                title: "Theme Preview",
+                isSystemAudio: false,
+                style: style,
+                height: geometry.size.height
+            )
+        }
+        .task {
+            while !Task.isCancelled {
+                updateLevels()
+                do {
+                    try await Task.sleep(for: .milliseconds(170))
+                } catch {
+                    return
+                }
+            }
+        }
+        .accessibilityHidden(true)
+    }
+
+    private func updateLevels() {
+        phase += Float.random(in: 0.16...0.34)
+
+        for index in levels.indices {
+            let position = Float(index) / Float(max(1, levels.count - 1))
+            let wave = 0.22 * (sin(phase + position * 12) + 1) / 2
+            let pulse = 0.25 * (sin(phase * 0.7 + position * 5.5) + 1) / 2
+            let rolloff = 0.24 * (1 - position)
+            let noise = Float.random(in: 0.02...0.24)
+            levels[index] = min(0.96, 0.08 + wave + pulse + rolloff + noise)
         }
     }
 }
