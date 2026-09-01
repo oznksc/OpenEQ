@@ -20,6 +20,8 @@ struct HeadphoneLibraryView: View {
                             .padding(.vertical, 8)
                     } else {
                         ForEach(filtered.prefix(30)) { profile in
+                            let selected = profile.id == viewModel.selectedHeadphoneProfileID
+
                             Button {
                                 withAnimation(.spring(response: 0.2, dampingFraction: 0.7)) {
                                     viewModel.applyHeadphoneProfile(profile)
@@ -28,7 +30,7 @@ struct HeadphoneLibraryView: View {
                                 HStack(spacing: 8) {
                                     Image(systemName: "headphones")
                                         .font(.system(size: 11))
-                                        .foregroundStyle(OpenEQTheme.accentCyan)
+                                        .foregroundStyle(selected ? OpenEQTheme.accentCyan : .secondary)
                                         .frame(width: 18)
 
                                     VStack(alignment: .leading, spacing: 1) {
@@ -42,13 +44,29 @@ struct HeadphoneLibraryView: View {
                                             .lineLimit(1)
                                     }
                                     Spacer(minLength: 0)
+
+                                    if selected {
+                                        Image(systemName: "checkmark.circle.fill")
+                                            .font(.system(size: 12, weight: .bold))
+                                            .foregroundStyle(OpenEQTheme.accentCyan)
+                                    }
                                 }
                                 .padding(.horizontal, 8)
                                 .padding(.vertical, 5)
-                                .background(OpenEQTheme.recessedSlotBg.opacity(0.6), in: RoundedRectangle(cornerRadius: 6))
+                                .background(
+                                    selected
+                                        ? OpenEQTheme.accentCyan.opacity(0.12)
+                                        : OpenEQTheme.recessedSlotBg.opacity(0.6),
+                                    in: RoundedRectangle(cornerRadius: 6)
+                                )
+                                .overlay {
+                                    RoundedRectangle(cornerRadius: 6)
+                                        .stroke(selected ? OpenEQTheme.accentCyan.opacity(0.35) : .clear, lineWidth: 0.8)
+                                }
                                 .contentShape(Rectangle())
                             }
                             .buttonStyle(TactileButtonStyle())
+                            .accessibilityValue(selected ? "Applied" : "Not applied")
                         }
                     }
                 }
@@ -89,4 +107,3 @@ struct HeadphoneLibraryView: View {
         .onAppear { viewModel.loadHeadphoneCatalogIfNeeded() }
     }
 }
-

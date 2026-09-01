@@ -157,6 +157,7 @@ final class OpenEQViewModel {
     var isLoadingAUPlugin = false
     var auPluginError: String?
     var headphoneProfiles: [HeadphoneProfile] = []
+    var selectedHeadphoneProfileID: HeadphoneProfile.ID?
     var calibrationImportMessage: String?
     var channelLayout: ChannelLayout = .stereo
     var systemEQSetupDetail: String?
@@ -368,6 +369,7 @@ final class OpenEQViewModel {
         guard mode != eqMode else { return }
 
         cacheActiveBands()
+        selectedHeadphoneProfileID = nil
         eqMode = mode
         bands = bandsForMode(mode)
         selectedBandID = bands.first?.id
@@ -501,6 +503,7 @@ final class OpenEQViewModel {
             setEQMode(.graphic)
         }
         applyPreset(preset)
+        selectedHeadphoneProfileID = profile.id
         // Keep as user-facing custom/applied name.
         calibrationImportMessage = "Applied \(profile.displayName) (\(profile.target))."
         errorMessage = nil
@@ -611,6 +614,7 @@ final class OpenEQViewModel {
 
     func updatePreamp(gain: Float) {
         preamp = gain
+        selectedHeadphoneProfileID = nil
         audioEngineController.setPreampGain(gain)
         selectedPreset = EQPreset(name: "Custom", mode: eqMode, bands: bands, preamp: preamp)
         updateExternalLoopbackEQIfNeeded()
@@ -633,6 +637,7 @@ final class OpenEQViewModel {
         }
 
         graphicBandCount = count
+        selectedHeadphoneProfileID = nil
         audioEngineController.currentGraphicBandCount = count
         let newBands = EQBand.defaultBands(count: count)
         bands = newBands
@@ -721,6 +726,7 @@ final class OpenEQViewModel {
 
     func applyPreset(_ preset: EQPreset) {
         cacheActiveBands()
+        selectedHeadphoneProfileID = nil
         selectedPreset = preset
         eqMode = preset.mode
         bands = preset.bands
@@ -807,6 +813,7 @@ final class OpenEQViewModel {
 
     private func commitActiveBandsAsCustom() {
         cacheActiveBands()
+        selectedHeadphoneProfileID = nil
         selectedPreset = EQPreset(name: "Custom", mode: eqMode, bands: bands, preamp: preamp)
     }
 

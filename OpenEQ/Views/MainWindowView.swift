@@ -3,11 +3,21 @@ import AppKit
 import Combine
 
 struct MainWindowView: View {
+    private enum EqualizerSheet: String, Identifiable {
+        case presets
+        case calibration
+
+        var id: String { rawValue }
+    }
+
     @Bindable var viewModel: OpenEQViewModel
     @State private var selectedTab: MainTab = .equalizer
     @State private var hoveredTab: MainTab?
     @State private var isShowingNodePalette = false
     @State private var bottomBarHeight = OpenEQTheme.bottomBarReservedSpace
+    @State private var equalizerSheet: EqualizerSheet?
+    @State private var headphoneQuery = ""
+    @AppStorage("spectrumVisualizationStyle") private var spectrumStyleRawValue = SpectrumVisualizationStyle.neon.rawValue
     private let comfortTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     private var graphStore: GraphStore { viewModel.graphStore }
 
@@ -20,10 +30,10 @@ struct MainWindowView: View {
     }
 
     enum MainTab: String, CaseIterable, Identifiable {
-        case equalizer, comfort, routing, library
+        case equalizer, comfort, routing, library, settings
         var id: Self { self }
-        var title: String { [Self.equalizer: "Equalizer", .comfort: "Comfort", .routing: "Routing", .library: "Library"][self]! }
-        var icon: String { [Self.equalizer: "slider.vertical.3", .comfort: "ear.and.waveform", .routing: "point.3.connected.trianglepath.dotted", .library: "square.stack.3d.up"][self]! }
+        var title: String { [Self.equalizer: "Equalizer", .comfort: "Comfort", .routing: "Routing", .library: "Library", .settings: "Settings"][self]! }
+        var icon: String { [Self.equalizer: "slider.vertical.3", .comfort: "ear.and.waveform", .routing: "point.3.connected.trianglepath.dotted", .library: "square.stack.3d.up", .settings: "gearshape"][self]! }
     }
 
     var body: some View {
@@ -35,7 +45,8 @@ struct MainWindowView: View {
                 selectedTab: selectedTab,
                 viewModel: viewModel,
                 graphStore: graphStore,
-                bottomContentPadding: bottomContentPadding
+                bottomContentPadding: bottomContentPadding,
+                spectrumStyle: spectrumStyleBinding
             )
 
             if selectedTab == .routing,
@@ -61,6 +72,9 @@ struct MainWindowView: View {
         .sheet(isPresented: $viewModel.isShowingSystemAudio) {
             SystemAudioView(viewModel: viewModel)
         }
+        .sheet(item: $equalizerSheet) { sheet in
+            equalizerAccessorySheet(sheet)
+        }
         .onAppear { viewModel.refreshAudioProcesses() }
         .onPreferenceChange(BottomBarHeightPreferenceKey.self) { height in
             guard height > 0, abs(height - bottomBarHeight) > 0.5 else { return }
@@ -73,6 +87,13 @@ struct MainWindowView: View {
 
     private var bottomContentPadding: CGFloat {
         bottomBarHeight * 1.1
+    }
+
+    private var spectrumStyleBinding: Binding<SpectrumVisualizationStyle> {
+        Binding(
+            get: { SpectrumVisualizationStyle(rawValue: spectrumStyleRawValue) ?? .neon },
+            set: { spectrumStyleRawValue = $0.rawValue }
+        )
     }
 
     private var bottomBar: some View {
@@ -371,7 +392,7 @@ struct MainWindowView: View {
         if #available(macOS 26.0, *) {
             if selectedTab == .equalizer {
                 ToolbarItem(placement: .primaryAction) {
-                    eqModePicker
+                    equalizerToolbarControls
                 }
                 .sharedBackgroundVisibility(.hidden)
             }
@@ -383,7 +404,7 @@ struct MainWindowView: View {
         } else {
             if selectedTab == .equalizer {
                 ToolbarItem(placement: .primaryAction) {
-                    eqModePicker
+                    equalizerToolbarControls
                 }
             }
 
@@ -391,6 +412,106 @@ struct MainWindowView: View {
                 resetEQButton
             }
         }
+    }
+
+    private var equalizerToolbarControls: some View {
+        HStack(spacing: 8) {
+            equalizerAccessorySegments
+            eqModePicker
+        }
+    }
+
+    @ViewBuilder
+    private var equalizerAccessorySegments: some View {
+        if #available(macOS 26.0, *) {
+            GlassEffectContainer(spacing: 4) {
+                equalizerAccessoryButtons(usesLiquidGlass: true)
+                    .padding(2.5)
+                    .glassEffect(.regular.interactive(), in: .capsule)
+            }
+        } else {
+            equalizerAccessoryButtons(usesLiquidGlass: false)
+                .padding(2.5)
+                .background(.ultraThinMaterial, in: Capsule())
+                .overlay { Capsule().stroke(Color.white.opacity(0.08), lineWidth: 1) }
+        }
+    }
+
+    private func equalizerAccessoryButtons(usesLiquidGlass: Bool) -> some View {
+        HStack(spacing: 2) {
+            equalizerAccessoryButton(
+                title: "Presets",
+                icon: "bookmark.fill",
+                sheet: .presets,
+                usesLiquidGlass: usesLiquidGlass
+            )
+            equalizerAccessoryButton(
+                title: "Calibration",
+                icon: "headphones",
+                sheet: .calibration,
+                usesLiquidGlass: usesLiquidGlass
+            )
+        }
+    }
+
+    @ViewBuilder
+    private func equalizerAccessoryButton(
+        title: String,
+        icon: String,
+        sheet: EqualizerSheet,
+        usesLiquidGlass: Bool
+    ) -> some View {
+        let button = Button {
+            equalizerSheet = sheet
+        } label: {
+            Label(title, systemImage: icon)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+
+        if #available(macOS 26.0, *), usesLiquidGlass {
+            button.glassEffect(.clear.interactive(), in: .capsule)
+        } else {
+            button
+        }
+    }
+
+    @ViewBuilder
+    private func equalizerAccessorySheet(_ sheet: EqualizerSheet) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label(
+                    sheet == .presets ? "Presets" : "Headphone Calibration",
+                    systemImage: sheet == .presets ? "bookmark.fill" : "headphones"
+                )
+                .font(.system(size: 16, weight: .bold, design: .rounded))
+
+                Spacer()
+
+                Button("Done") {
+                    equalizerSheet = nil
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+            }
+
+            if sheet == .presets {
+                PresetPanelView(viewModel: viewModel)
+            } else {
+                TextField("Search headphones", text: $headphoneQuery)
+                    .textFieldStyle(.roundedBorder)
+                HeadphoneLibraryView(viewModel: viewModel, searchText: $headphoneQuery)
+            }
+        }
+        .padding(20)
+        .frame(width: 540)
+        .frame(minHeight: sheet == .presets ? 430 : 340)
+        .background(OpenEQTheme.chassisBg)
     }
 
     @ViewBuilder

@@ -2,8 +2,9 @@ import SwiftUI
 
 struct EqualizerView: View {
     @Bindable var viewModel: OpenEQViewModel
-    @Binding var spectrumStyle: SpectrumVisualizationStyle
     @State private var spectrumDisplayMode: SpectrumDisplayMode = .backdrop
+    @State private var isShowingBandCountActions = false
+    @State private var isShowingSpectrumDisplayActions = false
     private let graphicCurveHeight: CGFloat = 230
     private let graphicFadersHeight: CGFloat = 184
 
@@ -14,36 +15,17 @@ struct EqualizerView: View {
                     StudioLED(isOn: viewModel.isEnabled, activeColor: OpenEQTheme.accentCyan, size: 9)
                     Text("\(viewModel.eqMode.title) EQ")
                         .font(.system(size: 17, weight: .bold, design: .rounded))
+
+                    spectrumDisplayButton
                 }
+
+                activeHeadphoneBadge
 
                 Spacer(minLength: 8)
 
-                Toggle("EQ", isOn: eqBinding)
-                    .toggleStyle(.switch)
-                    .controlSize(.small)
-                    .labelsHidden()
-                    .help("Toggle EQ (⌘B)")
-                    .accessibilityLabel("Equalizer")
-                    .accessibilityValue(viewModel.isEnabled ? "On" : "Off")
-
                 if viewModel.eqMode == .graphic {
-                    StudioSegmentedPicker(
-                        selection: bandCountBinding,
-                        items: GraphicBandCount.allCases,
-                        titleFor: { $0.title }
-                    )
-                    .frame(width: 150)
+                    bandCountButton
                 }
-
-                StudioSegmentedPicker(
-                    selection: $spectrumDisplayMode,
-                    items: SpectrumDisplayMode.allCases,
-                    titleFor: { $0.title },
-                    iconFor: { $0.icon }
-                )
-                .frame(width: 170)
-
-                spectrumStyleMenu
             }
 
             if viewModel.eqMode == .parametric {
@@ -74,6 +56,69 @@ struct EqualizerView: View {
                         .frame(height: graphicFadersHeight)
                 }
             }
+        }
+        .confirmationDialog("Graphic EQ Bands", isPresented: $isShowingBandCountActions) {
+            ForEach(GraphicBandCount.allCases) { count in
+                Button(count.title) {
+                    viewModel.setGraphicBandCount(count)
+                }
+            }
+        }
+        .confirmationDialog("Spectrum Display", isPresented: $isShowingSpectrumDisplayActions) {
+            ForEach(SpectrumDisplayMode.allCases) { mode in
+                Button(mode.title) {
+                    spectrumDisplayMode = mode
+                }
+            }
+        }
+    }
+
+    private var spectrumDisplayButton: some View {
+        Button {
+            isShowingSpectrumDisplayActions = true
+        } label: {
+            Image(systemName: spectrumDisplayMode.icon)
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(OpenEQTheme.accentCyan)
+                .frame(width: 24, height: 24)
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .help("Spectrum display: \(spectrumDisplayMode.title)")
+        .accessibilityLabel("Spectrum display")
+        .accessibilityValue(spectrumDisplayMode.title)
+    }
+
+    private var bandCountButton: some View {
+        Button {
+            isShowingBandCountActions = true
+        } label: {
+            HStack(spacing: 5) {
+                Text(viewModel.graphicBandCount.title)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 8, weight: .bold))
+            }
+            .font(.system(size: 11, weight: .bold, design: .rounded))
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .help("Choose graphic EQ band count")
+    }
+
+    @ViewBuilder
+    private var activeHeadphoneBadge: some View {
+        if let profileID = viewModel.selectedHeadphoneProfileID,
+           let profile = viewModel.headphoneProfiles.first(where: { $0.id == profileID }) {
+            HStack(spacing: 6) {
+                StudioLED(isOn: true, activeColor: OpenEQTheme.accentCyan, size: 6)
+                Text("\(profile.displayName) · \(profile.target)")
+                    .lineLimit(1)
+            }
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 6)
+            .background(OpenEQTheme.accentCyan.opacity(0.08), in: Capsule())
         }
     }
 
@@ -121,37 +166,6 @@ struct EqualizerView: View {
         .clipped()
         .opacity(viewModel.isEnabled ? 1 : 0.4)
         .animation(.easeInOut(duration: 0.2), value: viewModel.isEnabled)
-    }
-
-    private var spectrumStyleMenu: some View {
-        Menu {
-            ForEach(SpectrumVisualizationStyle.allCases) { style in
-                Button {
-                    withAnimation(.spring(response: 0.22, dampingFraction: 0.72)) {
-                        spectrumStyle = style
-                    }
-                } label: {
-                    Label(style.title, systemImage: style.icon)
-                }
-            }
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: spectrumStyle.icon)
-                    .foregroundStyle(spectrumStyle.accentColor)
-                Text(spectrumStyle.title)
-                    .font(.system(size: 11, weight: .semibold))
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(.system(size: 8, weight: .bold))
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(.ultraThinMaterial, in: Capsule())
-            .overlay { Capsule().stroke(Color.white.opacity(0.12), lineWidth: 0.8) }
-        }
-        .menuStyle(.borderlessButton)
-        .help("Spectrum style")
-        .accessibilityLabel("Spectrum style: \(spectrumStyle.title)")
     }
 
     private var preampControl: some View {
@@ -243,13 +257,6 @@ struct EqualizerView: View {
         }
     }
 
-    private var eqBinding: Binding<Bool> {
-        Binding(get: { viewModel.isEnabled }, set: { viewModel.setEnabled($0) })
-    }
-
-    private var bandCountBinding: Binding<GraphicBandCount> {
-        Binding(get: { viewModel.graphicBandCount }, set: { viewModel.setGraphicBandCount($0) })
-    }
 }
 
 // MARK: - Tactile EQ Band Control Fader
@@ -388,9 +395,6 @@ struct TactileFaderCap: View {
 }
 
 #Preview {
-    EqualizerView(
-        viewModel: OpenEQViewModel(audioEngineController: AudioEngineController()),
-        spectrumStyle: .constant(.neon)
-    )
+    EqualizerView(viewModel: OpenEQViewModel(audioEngineController: AudioEngineController()))
     .padding(24)
 }

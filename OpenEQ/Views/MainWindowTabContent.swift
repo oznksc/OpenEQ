@@ -5,7 +5,7 @@ struct MainWindowTabContent: View {
     @Bindable var viewModel: OpenEQViewModel
     let graphStore: GraphStore
     let bottomContentPadding: CGFloat
-    @State private var spectrumStyle: SpectrumVisualizationStyle = .neon
+    @Binding var spectrumStyle: SpectrumVisualizationStyle
 
     @ViewBuilder
     var body: some View {
@@ -18,6 +18,8 @@ struct MainWindowTabContent: View {
             GraphWorkspaceView(viewModel: viewModel, store: graphStore)
         case .library:
             libraryPage
+        case .settings:
+            settingsPage
         }
     }
 
@@ -33,7 +35,7 @@ struct MainWindowTabContent: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    EqualizerView(viewModel: viewModel, spectrumStyle: $spectrumStyle)
+                    EqualizerView(viewModel: viewModel)
                 }
                 .padding(24)
                 .padding(.bottom, bottomContentPadding)
@@ -43,6 +45,70 @@ struct MainWindowTabContent: View {
             .scrollContentBackground(.hidden)
             .background(Color.clear)
         }
+        .background(OpenEQTheme.chassisBg)
+    }
+
+    private var settingsPage: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            HStack(spacing: 8) {
+                Image(systemName: "gearshape.fill")
+                    .font(.title3)
+                    .foregroundStyle(OpenEQTheme.accentCyan)
+                Text("Settings")
+                    .font(.title3.weight(.bold))
+            }
+
+            VStack(alignment: .leading, spacing: 14) {
+                Text("SPECTRUM THEME")
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .tracking(1)
+                    .foregroundStyle(.secondary)
+
+                Text("Choose the visual style used behind the equalizer.")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.secondary)
+
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: 10)], spacing: 10) {
+                    ForEach(SpectrumVisualizationStyle.allCases) { style in
+                        Button {
+                            withAnimation(.spring(response: 0.22, dampingFraction: 0.72)) {
+                                spectrumStyle = style
+                            }
+                        } label: {
+                            HStack(spacing: 9) {
+                                Image(systemName: style.icon)
+                                    .foregroundStyle(style.accentColor)
+                                Text(style.title)
+                                    .font(.system(size: 12, weight: spectrumStyle == style ? .bold : .medium))
+                                Spacer(minLength: 0)
+                                if spectrumStyle == style {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundStyle(OpenEQTheme.accentCyan)
+                                }
+                            }
+                            .padding(12)
+                            .background(
+                                spectrumStyle == style
+                                    ? OpenEQTheme.accentCyan.opacity(0.12)
+                                    : OpenEQTheme.recessedSlotBg,
+                                in: RoundedRectangle(cornerRadius: 10)
+                            )
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 10)
+                                    .stroke(spectrumStyle == style ? OpenEQTheme.accentCyan.opacity(0.4) : Color.white.opacity(0.08), lineWidth: 0.8)
+                            }
+                        }
+                        .buttonStyle(TactileButtonStyle())
+                    }
+                }
+            }
+            .padding(18)
+            .studioCard(cornerRadius: 14)
+        }
+        .padding(24)
+        .padding(.bottom, bottomContentPadding)
+        .frame(maxWidth: 760, maxHeight: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(OpenEQTheme.chassisBg)
     }
 
