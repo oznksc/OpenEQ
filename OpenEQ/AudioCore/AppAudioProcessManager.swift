@@ -130,4 +130,10 @@ final class AppAudioProcessManager {
         channels[idx].selectedPresetName = presetName
         channels[idx].eqBands = bands
     }
+
+    func updateChannel(_ channel: AppAudioChannel) {
+        if let idx = channels.firstIndex(where: { $0.id == channel.id }) {
+            channels[idx] = channel
+        }
+    }
 }

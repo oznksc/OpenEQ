@@ -19,17 +19,27 @@ final class ExternalLoopbackEngine {
     var onAnalysis: ((SpectrumAnalysis) -> Void)?
 
     private let logger = AppLogger(category: "ExternalLoopback")
-    private let engine = AVAudioEngine()
-    private let eq = AVAudioUnitEQ(numberOfBands: 31)
-    private let limiter: AVAudioUnitEffect
     private let analyzer = SpectrumAnalyzer()
+    private var engine: AVAudioEngine?
+    private var eq: AVAudioUnitEQ?
+    private var limiter: AVAudioUnitEffect?
 
     private var selectedInputDevice: AudioDevice?
     private var selectedOutputDevice: AudioDevice?
     private var currentPreset: EQPreset = .flatPreset()
     private var isTapInstalled = false
 
-    init() {
+    init() {}
+
+    private func ensureGraphNodes() throws -> (
+        engine: AVAudioEngine,
+        eq: AVAudioUnitEQ,
+        limiter: AVAudioUnitEffect
+    ) {
+        if let engine, let eq, let limiter {
+            return (engine, eq, limiter)
+        }
+
         let limiterDescription = AudioComponentDescription(
             componentType: kAudioUnitType_Effect,
             componentSubType: kAudioUnitSubType_PeakLimiter,
@@ -37,8 +47,20 @@ final class ExternalLoopbackEngine {
             componentFlags: 0,
             componentFlagsMask: 0
         )
-        self.limiter = AVAudioUnitEffect(audioComponentDescription: limiterDescription)
+
+        let engine = AVAudioEngine()
+        let eq = AVAudioUnitEQ(numberOfBands: 31)
+        let limiter = AVAudioUnitEffect(audioComponentDescription: limiterDescription)
+
+        self.engine = engine
+        self.eq = eq
+        self.limiter = limiter
+
         PeakLimiterConfigurator.applyDefaults(to: limiter)
+        applyPreset(currentPreset)
+        setBypassed(isBypassed)
+
+        return (engine, eq, limiter)
     }
 
     func configure(inputDevice: AudioDevice?, outputDevice: AudioDevice?) {
@@ -53,10 +75,10 @@ final class ExternalLoopbackEngine {
 
         do {
             try validateRouting()
-            try configureGraph()
+            let nodes = try configureGraph()
             updateEQ(preset)
             try installAnalyzerTap()
-            try engine.start()
+            try nodes.engine.start()
             latencyEstimate = estimateLatency()
             status = .running
             logger.info("External loopback engine started.")
@@ -73,8 +95,8 @@ final class ExternalLoopbackEngine {
 
     func stop() {
         removeAnalyzerTap()
-        engine.stop()
-        engine.reset()
+        engine?.stop()
+        engine?.reset()
         status = .stopped
         latencyEstimate = nil
     }
@@ -94,36 +116,41 @@ final class ExternalLoopbackEngine {
 
     func setBypassed(_ isBypassed: Bool) {
         self.isBypassed = isBypassed
-        // EQ can be bypassed for A/B; limiter stays on for headroom safety.
-        eq.bypass = isBypassed
-        limiter.bypass = false
+        eq?.bypass = isBypassed
+        limiter?.bypass = false
     }
 
-    private func configureGraph() throws {
-        let input = engine.inputNode
-        let mixer = engine.mainMixerNode
+    private func configureGraph() throws -> (
+        engine: AVAudioEngine,
+        eq: AVAudioUnitEQ,
+        limiter: AVAudioUnitEffect
+    ) {
+        let nodes = try ensureGraphNodes()
+        let input = nodes.engine.inputNode
+        let mixer = nodes.engine.mainMixerNode
         let inputFormat = input.outputFormat(forBus: 0)
 
         guard inputFormat.channelCount > 0, inputFormat.sampleRate > 0 else {
             throw ExternalLoopbackError.invalidAudioFormat
         }
 
-        if eq.engine == nil {
-            engine.attach(eq)
+        if nodes.eq.engine == nil {
+            nodes.engine.attach(nodes.eq)
         }
 
-        if limiter.engine == nil {
-            engine.attach(limiter)
+        if nodes.limiter.engine == nil {
+            nodes.engine.attach(nodes.limiter)
         }
 
-        engine.disconnectNodeOutput(input)
-        engine.disconnectNodeOutput(eq)
-        engine.disconnectNodeOutput(limiter)
+        nodes.engine.disconnectNodeOutput(input)
+        nodes.engine.disconnectNodeOutput(nodes.eq)
+        nodes.engine.disconnectNodeOutput(nodes.limiter)
 
-        // External loopback path: selected virtual input -> EQ -> limiter -> selected/default output.
-        engine.connect(input, to: eq, format: inputFormat)
-        engine.connect(eq, to: limiter, format: inputFormat)
-        engine.connect(limiter, to: mixer, format: inputFormat)
+        nodes.engine.connect(input, to: nodes.eq, format: inputFormat)
+        nodes.engine.connect(nodes.eq, to: nodes.limiter, format: inputFormat)
+        nodes.engine.connect(nodes.limiter, to: mixer, format: inputFormat)
+
+        return nodes
     }
 
     private func validateRouting() throws {
@@ -151,6 +178,7 @@ final class ExternalLoopbackEngine {
     }
 
     private func applyPreset(_ preset: EQPreset) {
+        guard let eq else { return }
         let activeBandCount = min(preset.bands.count, eq.bands.count)
         eq.globalGain = preset.preamp
 
@@ -174,6 +202,7 @@ final class ExternalLoopbackEngine {
 
     private func installAnalyzerTap() throws {
         guard !isTapInstalled else { return }
+        guard let engine else { throw ExternalLoopbackError.invalidAudioFormat }
 
         let format = engine.mainMixerNode.outputFormat(forBus: 0)
         guard format.channelCount > 0, format.sampleRate > 0 else {
@@ -195,18 +224,19 @@ final class ExternalLoopbackEngine {
 
     private func cleanupAfterFailedStart() {
         removeAnalyzerTap()
-        engine.stop()
-        engine.reset()
+        engine?.stop()
+        engine?.reset()
         latencyEstimate = nil
     }
 
     private func removeAnalyzerTap() {
         guard isTapInstalled else { return }
-        engine.mainMixerNode.removeTap(onBus: 0)
+        engine?.mainMixerNode.removeTap(onBus: 0)
         isTapInstalled = false
     }
 
     private func estimateLatency() -> TimeInterval {
+        guard let engine else { return 0 }
         let inputLatency = engine.inputNode.latency
         let outputLatency = engine.outputNode.latency
         let ioBufferLatency = Double(engine.inputNode.outputFormat(forBus: 0).sampleRate > 0 ? 1024.0 / engine.inputNode.outputFormat(forBus: 0).sampleRate : 0.0)

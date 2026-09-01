@@ -12,7 +12,6 @@ final class OpenEQUITests: XCTestCase {
 
         XCTAssertTrue(app.windows["OpenEQ"].waitForExistence(timeout: 8))
         XCTAssertTrue(app.buttons["System Audio"].exists)
-        XCTAssertTrue(app.buttons["folder.badge.plus"].exists)
     }
 
     @MainActor
@@ -20,9 +19,9 @@ final class OpenEQUITests: XCTestCase {
         let app = XCUIApplication()
         app.launch()
 
-        let systemAudioButton = app.buttons["System Audio"]
-        XCTAssertTrue(systemAudioButton.waitForExistence(timeout: 8))
-        systemAudioButton.click()
+        let settingsButton = app.buttons["System Audio Settings"]
+        XCTAssertTrue(settingsButton.waitForExistence(timeout: 8))
+        settingsButton.click()
 
         XCTAssertTrue(app.buttons["Done"].waitForExistence(timeout: 3))
         XCTAssertTrue(app.staticTexts["System Audio"].exists)

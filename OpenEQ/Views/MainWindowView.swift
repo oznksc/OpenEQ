@@ -65,7 +65,7 @@ struct MainWindowView: View {
         .animation(.easeInOut(duration: 0.2), value: selectedTab)
         .animation(.easeInOut(duration: 0.16), value: viewModel.showGraphInspector)
         .frame(width: OpenEQTheme.minWindowWidth, height: OpenEQTheme.minWindowHeight)
-        .navigationTitle("")
+        .navigationTitle("OpenEQ")
         .toolbarTitleDisplayMode(.inline)
         .toolbarBackground(.hidden, for: .windowToolbar)
         .toolbar { toolbarContent }
@@ -183,6 +183,8 @@ struct MainWindowView: View {
                 .frame(height: 26)
                 .contentShape(Capsule())
             }
+            .accessibilityLabel("System Audio")
+            .accessibilityIdentifier("System Audio")
             .buttonStyle(.plain)
             .help(viewModel.isSystemEQActive ? "Stop System EQ" : "Start System EQ")
 
@@ -195,6 +197,8 @@ struct MainWindowView: View {
                     .frame(width: 24, height: 26)
                     .contentShape(Circle())
             }
+            .accessibilityLabel("System Audio Settings")
+            .accessibilityIdentifier("System Audio Settings")
             .buttonStyle(.plain)
             .help("System Audio settings")
         }

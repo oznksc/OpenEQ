@@ -26,12 +26,12 @@ final class AudioEngineController {
     private var storedPlaybackPosition: TimeInterval = 0
 
     private let logger = AppLogger(category: "AudioEngine")
-    private let engine = AVAudioEngine()
-    private let player = AVAudioPlayerNode()
-    private let eq = AVAudioUnitEQ(numberOfBands: 31)
     private let analyzer = SpectrumAnalyzer()
-    private let compressor: AVAudioUnitEffect
-    private let limiter: AVAudioUnitEffect
+    private var engine: AVAudioEngine?
+    private var player: AVAudioPlayerNode?
+    private var eq: AVAudioUnitEQ?
+    private var compressor: AVAudioUnitEffect?
+    private var limiter: AVAudioUnitEffect?
     private var insertedAU: AVAudioUnit?
     
     private var audioFile: AVAudioFile?
@@ -44,7 +44,19 @@ final class AudioEngineController {
     private var stereoBalance: Float = 0
     private var analysisFramesSinceLast = 0
 
-    init() {
+    init() {}
+
+    private func ensureGraphNodes() throws -> (
+        engine: AVAudioEngine,
+        player: AVAudioPlayerNode,
+        eq: AVAudioUnitEQ,
+        compressor: AVAudioUnitEffect,
+        limiter: AVAudioUnitEffect
+    ) {
+        if let engine, let player, let eq, let compressor, let limiter {
+            return (engine, player, eq, compressor, limiter)
+        }
+
         let compressorDesc = AudioComponentDescription(
             componentType: kAudioUnitType_Effect,
             componentSubType: kAudioUnitSubType_DynamicsProcessor,
@@ -52,7 +64,6 @@ final class AudioEngineController {
             componentFlags: 0,
             componentFlagsMask: 0
         )
-        compressor = AVAudioUnitEffect(audioComponentDescription: compressorDesc)
 
         let limiterDesc = AudioComponentDescription(
             componentType: kAudioUnitType_Effect,
@@ -61,12 +72,26 @@ final class AudioEngineController {
             componentFlags: 0,
             componentFlagsMask: 0
         )
-        limiter = AVAudioUnitEffect(audioComponentDescription: limiterDesc)
+
+        let engine = AVAudioEngine()
+        let player = AVAudioPlayerNode()
+        let eq = AVAudioUnitEQ(numberOfBands: 31)
+        let compressor = AVAudioUnitEffect(audioComponentDescription: compressorDesc)
+        let limiter = AVAudioUnitEffect(audioComponentDescription: limiterDesc)
+
+        self.engine = engine
+        self.player = player
+        self.eq = eq
+        self.compressor = compressor
+        self.limiter = limiter
+
         configureEQ()
         configureCompressor()
         configureLimiter()
         applyDynamics(dynamics)
         applyBalance(0)
+
+        return (engine, player, eq, compressor, limiter)
     }
     
     deinit {
@@ -82,6 +107,7 @@ final class AudioEngineController {
 
     var playbackPosition: TimeInterval {
         guard playbackState == .playing,
+              let player,
               let renderTime = player.lastRenderTime,
               let playerTime = player.playerTime(forNodeTime: renderTime),
               playerTime.sampleRate > 0 else {
@@ -93,6 +119,7 @@ final class AudioEngineController {
     }
 
     private func configureEQ() {
+        guard let eq else { return }
         let defaultBands = EQBand.defaultBands(count: .thirtyOne)
         for index in 0..<eq.bands.count {
             let audioBand = eq.bands[index]
@@ -107,15 +134,21 @@ final class AudioEngineController {
     }
 
     private func configureLimiter() {
+        guard let limiter else { return }
         PeakLimiterConfigurator.applyDefaults(to: limiter)
     }
 
     private func configureCompressor() {
-        // Defaults applied via applyDynamics; ensure unit is not bypassed by accident.
-        compressor.bypass = true
+        compressor?.bypass = true
     }
 
-    private func attachNodesIfNeeded() {
+    private func attachNodesIfNeeded(
+        engine: AVAudioEngine,
+        player: AVAudioPlayerNode,
+        eq: AVAudioUnitEQ,
+        compressor: AVAudioUnitEffect,
+        limiter: AVAudioUnitEffect
+    ) {
         if player.engine == nil {
             engine.attach(player)
         }
@@ -138,41 +171,49 @@ final class AudioEngineController {
     }
 
     private func connectGraph(format: AVAudioFormat) throws {
+        let nodes = try ensureGraphNodes()
+
         guard format.channelCount > 0, format.sampleRate > 0 else {
             throw AudioEngineError.audioGraphConnectionFailed("Invalid file format.")
         }
 
-        attachNodesIfNeeded()
+        attachNodesIfNeeded(
+            engine: nodes.engine,
+            player: nodes.player,
+            eq: nodes.eq,
+            compressor: nodes.compressor,
+            limiter: nodes.limiter
+        )
 
         if isGraphConnected {
-            engine.disconnectNodeOutput(player)
-            engine.disconnectNodeOutput(eq)
-            engine.disconnectNodeOutput(compressor)
+            nodes.engine.disconnectNodeOutput(nodes.player)
+            nodes.engine.disconnectNodeOutput(nodes.eq)
+            nodes.engine.disconnectNodeOutput(nodes.compressor)
             if let insertedAU {
-                engine.disconnectNodeOutput(insertedAU)
+                nodes.engine.disconnectNodeOutput(insertedAU)
             }
-            engine.disconnectNodeOutput(limiter)
+            nodes.engine.disconnectNodeOutput(nodes.limiter)
             isGraphConnected = false
         }
 
-        // player → EQ → compressor → [optional AU] → peak limiter → mixer
-        engine.connect(player, to: eq, format: format)
-        engine.connect(eq, to: compressor, format: format)
+        nodes.engine.connect(nodes.player, to: nodes.eq, format: format)
+        nodes.engine.connect(nodes.eq, to: nodes.compressor, format: format)
         if let insertedAU {
-            engine.connect(compressor, to: insertedAU, format: format)
-            engine.connect(insertedAU, to: limiter, format: format)
+            nodes.engine.connect(nodes.compressor, to: insertedAU, format: format)
+            nodes.engine.connect(insertedAU, to: nodes.limiter, format: format)
         } else {
-            engine.connect(compressor, to: limiter, format: format)
+            nodes.engine.connect(nodes.compressor, to: nodes.limiter, format: format)
         }
-        engine.connect(limiter, to: engine.mainMixerNode, format: format)
+        nodes.engine.connect(nodes.limiter, to: nodes.engine.mainMixerNode, format: format)
         isGraphConnected = true
         applyBalance(stereoBalance)
     }
 
     private func startEngineIfNeeded() throws {
-        if !engine.isRunning {
+        let nodes = try ensureGraphNodes()
+        if !nodes.engine.isRunning {
             do {
-                try engine.start()
+                try nodes.engine.start()
             } catch {
                 throw AudioEngineError.engineFailedToStart(error.localizedDescription)
             }
@@ -217,9 +258,9 @@ final class AudioEngineController {
                 "Format change: \(lastProcessingFormat!.sampleRate)/\(lastProcessingFormat!.channelCount)ch -> \(newFormat.sampleRate)/\(newFormat.channelCount)ch"
             )
             removeTap()
-            player.stop()
-            engine.stop()
-            engine.reset()
+            player?.stop()
+            engine?.stop()
+            engine?.reset()
             isGraphConnected = false
         }
 
@@ -266,6 +307,10 @@ final class AudioEngineController {
         
         do {
             try startEngineIfNeeded()
+            guard let player else {
+                fail(AudioEngineError.audioGraphConnectionFailed("Audio graph is not initialized."))
+                return
+            }
             player.play()
             playbackState = .playing
             installTap()
@@ -278,7 +323,7 @@ final class AudioEngineController {
     func pause() {
         guard playbackState == .playing else { return }
         storedPlaybackPosition = playbackPosition
-        player.pause()
+        player?.pause()
         playbackState = .paused
         removeTap()
         logger.info("Playback paused")
@@ -292,8 +337,8 @@ final class AudioEngineController {
         playbackGeneration &+= 1
         storedPlaybackPosition = 0
         removeTap()
-        player.stop()
-        engine.pause()
+        player?.stop()
+        engine?.pause()
         
         if clearFile {
             audioFile = nil
@@ -312,6 +357,7 @@ final class AudioEngineController {
 
     private func scheduleCurrentFile() {
         guard let audioFile else { return }
+        guard let player else { return }
         let generation = playbackGeneration
         player.scheduleFile(audioFile, at: nil) { [weak self] in
             DispatchQueue.main.async { [weak self] in
@@ -327,8 +373,8 @@ final class AudioEngineController {
         }
 
         removeTap()
-        player.stop()
-        engine.pause()
+        player?.stop()
+        engine?.pause()
         playbackState = .stopped
         storedPlaybackPosition = playbackDuration
         resetAnalysisState()
@@ -367,8 +413,8 @@ final class AudioEngineController {
 
         playbackGeneration &+= 1
         removeTap()
-        player.stop()
-        engine.pause()
+        player?.stop()
+        engine?.pause()
         storedPlaybackPosition = clampedTime
 
         guard remainingFrames > 0 else {
@@ -379,6 +425,10 @@ final class AudioEngineController {
         }
 
         let generation = playbackGeneration
+        guard let player else {
+            fail(AudioEngineError.audioGraphConnectionFailed("Audio graph is not initialized."))
+            return
+        }
         player.scheduleSegment(
             audioFile,
             startingFrame: startFrame,
@@ -407,41 +457,55 @@ final class AudioEngineController {
     func teardown() {
         logger.info("Tearing down audio engine")
         removeTap()
-        player.stop()
-        engine.stop()
-        engine.reset()
+        player?.stop()
+        engine?.stop()
+        engine?.reset()
 
         if isGraphConnected {
-            engine.disconnectNodeOutput(player)
-            engine.disconnectNodeOutput(eq)
-            engine.disconnectNodeOutput(compressor)
-            if let insertedAU {
-                engine.disconnectNodeOutput(insertedAU)
+            if let player {
+                engine?.disconnectNodeOutput(player)
             }
-            engine.disconnectNodeOutput(limiter)
+            if let eq {
+                engine?.disconnectNodeOutput(eq)
+            }
+            if let compressor {
+                engine?.disconnectNodeOutput(compressor)
+            }
+            if let insertedAU {
+                engine?.disconnectNodeOutput(insertedAU)
+            }
+            if let limiter {
+                engine?.disconnectNodeOutput(limiter)
+            }
             isGraphConnected = false
         }
 
         if let insertedAU, insertedAU.engine != nil {
-            engine.detach(insertedAU)
+            engine?.detach(insertedAU)
         }
         insertedAU = nil
 
-        if player.engine != nil {
-            engine.detach(player)
+        if let player, player.engine != nil {
+            engine?.detach(player)
         }
 
-        if eq.engine != nil {
-            engine.detach(eq)
+        if let eq, eq.engine != nil {
+            engine?.detach(eq)
         }
 
-        if compressor.engine != nil {
-            engine.detach(compressor)
+        if let compressor, compressor.engine != nil {
+            engine?.detach(compressor)
         }
 
-        if limiter.engine != nil {
-            engine.detach(limiter)
+        if let limiter, limiter.engine != nil {
+            engine?.detach(limiter)
         }
+
+        engine = nil
+        player = nil
+        eq = nil
+        compressor = nil
+        limiter = nil
 
         audioFile = nil
         currentFileURL = nil
@@ -450,12 +514,14 @@ final class AudioEngineController {
     }
 
     func setBandGain(index: Int, gain: Float) {
+        guard let eq else { return }
         guard index >= 0 && index < eq.bands.count else { return }
         let clampedGain = max(EQBand.gainRange.lowerBound, min(EQBand.gainRange.upperBound, gain))
         eq.bands[index].gain = clampedGain
     }
 
     func setBandEnabled(index: Int, isEnabled: Bool) {
+        guard let eq else { return }
         guard index >= 0 && index < eq.bands.count else { return }
         eq.bands[index].bypass = !isEnabled
     }
@@ -471,6 +537,7 @@ final class AudioEngineController {
             updatedAt: Date()
         )
 
+        guard let eq else { return }
         let activeBandCount = min(bands.count, eq.bands.count)
 
         for index in 0..<eq.bands.count {
@@ -492,18 +559,16 @@ final class AudioEngineController {
     }
 
     func setBypass(_ bypass: Bool) {
-        // Keep the peak limiter engaged even when EQ is bypassed so volume
-        // boost and preamp cannot hard-clip the output path.
-        // Compressor enable is independent of EQ A/B bypass.
-        eq.bypass = bypass
-        compressor.bypass = !dynamics.isCompressorEnabled
-        limiter.bypass = false
+        eq?.bypass = bypass
+        compressor?.bypass = !dynamics.isCompressorEnabled
+        limiter?.bypass = false
     }
 
     func applyDynamics(_ settings: DynamicsSettings) {
         var clamped = settings
         clamped.clamp()
         dynamics = clamped
+        guard let compressor else { return }
         compressor.bypass = !clamped.isCompressorEnabled
 
         guard let tree = compressor.auAudioUnit.parameterTree else { return }
@@ -533,21 +598,27 @@ final class AudioEngineController {
 
     func applyBalance(_ balance: Float) {
         stereoBalance = min(max(balance, -1), 1)
-        engine.mainMixerNode.pan = stereoBalance
+        engine?.mainMixerNode.pan = stereoBalance
     }
 
-    /// Inserts an already-instantiated AU effect into the local graph (after compressor).
     func insertAudioUnit(_ unit: AVAudioUnit) throws {
+        let nodes = try ensureGraphNodes()
         if let existing = insertedAU, existing.engine != nil {
-            engine.disconnectNodeOutput(existing)
-            engine.detach(existing)
+            nodes.engine.disconnectNodeOutput(existing)
+            nodes.engine.detach(existing)
         }
         insertedAU = unit
         if let format = lastProcessingFormat {
             try connectGraph(format: format)
             try startEngineIfNeeded()
         } else {
-            attachNodesIfNeeded()
+            attachNodesIfNeeded(
+                engine: nodes.engine,
+                player: nodes.player,
+                eq: nodes.eq,
+                compressor: nodes.compressor,
+                limiter: nodes.limiter
+            )
         }
         logger.info("Inserted AU unit into local graph")
     }
@@ -555,10 +626,10 @@ final class AudioEngineController {
     func removeInsertedAudioUnit() {
         guard let existing = insertedAU else { return }
         if isGraphConnected {
-            engine.disconnectNodeOutput(existing)
+            engine?.disconnectNodeOutput(existing)
         }
         if existing.engine != nil {
-            engine.detach(existing)
+            engine?.detach(existing)
         }
         insertedAU = nil
         if let format = lastProcessingFormat {
@@ -592,7 +663,7 @@ final class AudioEngineController {
 
     private func applyVolume() {
         let preampVolume = pow(10.0, currentPreampGain / 20.0)
-        player.volume = isMuted ? 0 : outputVolume * preampVolume * volumeBoostMultiplier
+        player?.volume = isMuted ? 0 : outputVolume * preampVolume * volumeBoostMultiplier
     }
 
     func applyPreset(_ preset: EQPreset) {
@@ -614,6 +685,7 @@ final class AudioEngineController {
     
     private func installTap() {
         guard !isTapInstalled else { return }
+        guard let engine else { return }
         
         let format = engine.mainMixerNode.outputFormat(forBus: 0)
         
@@ -646,7 +718,7 @@ final class AudioEngineController {
     
     private func removeTap() {
         guard isTapInstalled else { return }
-        engine.mainMixerNode.removeTap(onBus: 0)
+        engine?.mainMixerNode.removeTap(onBus: 0)
         isTapInstalled = false
     }
 

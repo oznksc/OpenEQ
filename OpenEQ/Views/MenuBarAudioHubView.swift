@@ -47,6 +47,10 @@ struct MenuBarAudioHubView: View {
             .padding(16)
         }
         .frame(width: 360, height: 520)
+        .onReceive(NotificationCenter.default.publisher(for: .showMainWindow)) { _ in
+            openWindow(id: "main")
+            NSApplication.shared.activate(ignoringOtherApps: true)
+        }
     }
     
     // MARK: - Header Bar
@@ -74,8 +78,8 @@ struct MenuBarAudioHubView: View {
             .buttonStyle(.plain)
             
             Button {
-                // Settings action
                 openWindow(id: "main")
+                NSApplication.shared.activate(ignoringOtherApps: true)
             } label: {
                 Image(systemName: "gearshape")
                     .font(.system(size: 12))
@@ -272,12 +276,13 @@ struct MenuBarAudioHubView: View {
                     ),
                     arrowEdge: .trailing
                 ) {
-                    if let idx = viewModel.appAudioProcessManager.channels.firstIndex(where: { $0.id == channel.id }) {
-                        AppOutputRoutingPopover(
-                            channel: $viewModel.appAudioProcessManager.channels[idx],
-                            availableOutputs: viewModel.availableOutputDevices
-                        )
-                    }
+                    AppOutputRoutingPopover(
+                        channel: Binding(
+                            get: { channel },
+                            set: { updated in viewModel.appAudioProcessManager.updateChannel(updated) }
+                        ),
+                        availableOutputs: viewModel.availableOutputDevices
+                    )
                 }
                 
                 // Inline EQ Toggle Button
@@ -293,12 +298,13 @@ struct MenuBarAudioHubView: View {
             
             // Expanded Inline 10-Band EQ if opened
             if channel.isEQExpanded {
-                if let idx = viewModel.appAudioProcessManager.channels.firstIndex(where: { $0.id == channel.id }) {
-                    AppInlineEQView(
-                        channel: $viewModel.appAudioProcessManager.channels[idx]
+                AppInlineEQView(
+                    channel: Binding(
+                        get: { channel },
+                        set: { updated in viewModel.appAudioProcessManager.updateChannel(updated) }
                     )
-                    .transition(.move(edge: .top).combined(with: .opacity))
-                }
+                )
+                .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
         .padding(8)
