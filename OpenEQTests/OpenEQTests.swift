@@ -552,6 +552,62 @@ final class OpenEQTests: XCTestCase {
         XCTAssertLessThanOrEqual(output.map(abs).max() ?? 2, 1)
     }
 
+    func testSystemAudioDSPRealtimeDeadlineMargin() {
+        let bands = EQBand.defaultBands(count: .thirtyOne).enumerated().map { index, band in
+            EQBand(frequency: band.frequency, gain: index.isMultiple(of: 2) ? 6 : -6, q: 1)
+        }
+        let dsp = SystemAudioDSPState()
+        dsp.configure(EQPreset(name: "Realtime benchmark", bands: bands), sampleRate: 48_000)
+        let frameCount = 256
+        let samples = UnsafeMutablePointer<Float>.allocate(capacity: frameCount)
+        samples.initialize(repeating: 0.05, count: frameCount)
+        defer {
+            samples.deinitialize(count: frameCount)
+            samples.deallocate()
+        }
+        for _ in 0..<8 {
+            dsp.process(samples, frames: frameCount, channel: 0)
+        }
+
+        var durations = [UInt64]()
+        durations.reserveCapacity(2000)
+        for _ in 0..<2000 {
+            let start = DispatchTime.now().uptimeNanoseconds
+            dsp.process(samples, frames: frameCount, channel: 0)
+            durations.append(DispatchTime.now().uptimeNanoseconds - start)
+        }
+        durations.sort()
+        let percentile99 = durations[Int(Double(durations.count - 1) * 0.99)]
+        let callbackBudget = UInt64(Double(frameCount) / 48_000 * 1_000_000_000)
+
+        XCTAssertLessThan(percentile99, callbackBudget / 4)
+    }
+
+    func testSystemAudioIOCallbackContainsNoForbiddenRealtimeOperations() throws {
+        let repositoryRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let sourceURL = repositoryRoot.appendingPathComponent("OpenEQ/AudioCore/SystemAudioEQEngine.swift")
+        let source = try String(contentsOf: sourceURL, encoding: .utf8)
+        let callbackMethods = [
+            "handleIO", "enqueueAnalysis", "isNonInterleaved", "processNonInterleaved",
+            "processInterleaved", "processNonInterleavedToInterleaved",
+            "processInterleavedToNonInterleaved", "applyFeedbackGuard", "silence",
+            "ensureScratch", "copyInterleaved", "copyNonInterleavedToInterleaved"
+        ]
+        let forbiddenOperations = [
+            "DispatchQueue", ".async", ".sync", "logger.", ".allocate(",
+            "DispatchSemaphore", ".wait(", ".append(", "reserveCapacity"
+        ]
+
+        for method in callbackMethods {
+            let body = try swiftFunctionBody(named: method, in: source)
+            for operation in forbiddenOperations {
+                XCTAssertFalse(body.contains(operation), "\(method) contains realtime-forbidden operation \(operation)")
+            }
+        }
+    }
+
     private func sineWave(
         frequency: Double,
         frameCount: Int,
@@ -664,6 +720,27 @@ final class OpenEQTests: XCTestCase {
         let fundamentalEnergy = Double(samples.count) * (sineAmplitude * sineAmplitude + cosineAmplitude * cosineAmplitude) / 2
         let residualEnergy = max(0, totalEnergy - fundamentalEnergy)
         return 10 * log10(max(residualEnergy, 1e-20) / max(fundamentalEnergy, 1e-20))
+    }
+
+    private func swiftFunctionBody(named name: String, in source: String) throws -> Substring {
+        guard let signature = source.range(of: "func \(name)("),
+              let openingBrace = source[signature.lowerBound...].firstIndex(of: "{") else {
+            throw NSError(domain: "RealtimeAudit", code: 1, userInfo: [NSLocalizedDescriptionKey: "Missing function \(name)"])
+        }
+        var depth = 0
+        var cursor = openingBrace
+        while cursor < source.endIndex {
+            if source[cursor] == "{" {
+                depth += 1
+            } else if source[cursor] == "}" {
+                depth -= 1
+                if depth == 0 {
+                    return source[openingBrace...cursor]
+                }
+            }
+            cursor = source.index(after: cursor)
+        }
+        throw NSError(domain: "RealtimeAudit", code: 2, userInfo: [NSLocalizedDescriptionKey: "Unclosed function \(name)"])
     }
 
     // MARK: - Phase 2

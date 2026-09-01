@@ -29,7 +29,7 @@ final class SystemAudioEQEngine {
 
     private let ioQueue = DispatchQueue(label: "com.openeq.system-audio-eq.io", qos: .userInteractive)
     private let analysisQueue = DispatchQueue(label: "com.openeq.system-audio-eq.analysis", qos: .utility)
-    private let analysisWakeup = DispatchSemaphore(value: 0)
+    private var analysisTimer: DispatchSourceTimer?
     private var tapID = AudioObjectID(kAudioObjectUnknown)
     private var tapUUIDString: String?
     private var aggDeviceID = AudioObjectID(kAudioObjectUnknown)
@@ -44,24 +44,23 @@ final class SystemAudioEQEngine {
     private var safetyTripNotified = false
     private var feedbackProtectionEnabled = true
     private var isObservingDefaultOutput = false
-    private var ioCallbackCount: UInt64 = 0
-    private var ioFramesWithSignal: UInt64 = 0
+    private var ioCallbackCount: Int64 = 0
+    private var ioFramesWithSignal: Int64 = 0
     private var healthCheckWorkItem: DispatchWorkItem?
     private var deinterleaveScratch: [UnsafeMutablePointer<Float>?] = [nil, nil]
     private var deinterleaveCapacity: Int = 0
     private var analysisBuffers: [[UnsafeMutablePointer<Float>]] = []
     private var analysisBufferCapacity = 0
-    private var analysisPending = false
+    private var analysisReadySlot: Int32 = -1
     private var analysisSlot = 0
-    private var analysisWorkSlot = 0
     private var analysisWorkChannels = 0
     private var analysisWorkFrames = 0
     private var analysisWorkSampleRate: Double = 48000
     private var analysisAccumulatedFrames = 0
     private var analysisAccumulationChannels = 0
-    private var isAnalysisWorkerStopping = false
-    private var droppedAnalysisBuffers: UInt64 = 0
-    private var hasScheduledTapAudioPublication = false
+    private var droppedAnalysisBuffers: Int64 = 0
+    private var tapSignalPublicationPending: Int32 = 0
+    private var safetyTripPublicationPending: Int32 = 0
     private var tapTarget: ProcessTapTarget = .systemExcludingSelf
     private var preferredPhysicalOutputUID: String?
     private lazy var defaultOutputListener: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
@@ -72,22 +71,19 @@ final class SystemAudioEQEngine {
         prepareScratch(capacity: Self.defaultScratchCapacity)
         prepareAnalysisBuffers(capacity: 1024)
 
-        let wakeup = analysisWakeup
-        analysisQueue.async { [weak self] in
-            while wakeup.wait(timeout: .distantFuture) == .success {
-                guard let self else { return }
-                guard !self.isAnalysisWorkerStopping else { return }
-                self.processPendingAnalysis()
-            }
-        }
+        let timer = DispatchSource.makeTimerSource(queue: analysisQueue)
+        timer.schedule(deadline: .now(), repeating: .milliseconds(16), leeway: .milliseconds(2))
+        timer.setEventHandler { [weak self] in self?.drainRealtimePublications() }
+        timer.resume()
+        analysisTimer = timer
     }
 
     deinit {
         stopObservingDefaultOutput()
         stop()
         freeScratch()
-        isAnalysisWorkerStopping = true
-        analysisWakeup.signal()
+        analysisTimer?.cancel()
+        analysisTimer = nil
         analysisQueue.sync { }
         freeAnalysisBuffers()
     }
@@ -134,9 +130,11 @@ final class SystemAudioEQEngine {
                 ioCallbackCount = 0
                 ioFramesWithSignal = 0
                 droppedAnalysisBuffers = 0
+                analysisReadySlot = -1
+                tapSignalPublicationPending = 0
+                safetyTripPublicationPending = 0
                 analysisAccumulatedFrames = 0
                 analysisAccumulationChannels = 0
-                hasScheduledTapAudioPublication = false
             }
             isReceivingTapAudio = false
             try setupAggregateWithOutput()
@@ -171,9 +169,11 @@ final class SystemAudioEQEngine {
             ioCallbackCount = 0
             ioFramesWithSignal = 0
             droppedAnalysisBuffers = 0
+            analysisReadySlot = -1
+            tapSignalPublicationPending = 0
+            safetyTripPublicationPending = 0
             analysisAccumulatedFrames = 0
             analysisAccumulationChannels = 0
-            hasScheduledTapAudioPublication = false
         }
         isRunning = false
         isRebuilding = false
@@ -620,8 +620,8 @@ final class SystemAudioEQEngine {
         healthCheckWorkItem?.cancel()
         let work = DispatchWorkItem { [weak self] in
             guard let self, self.isRunning else { return }
-            let callbacks = self.ioQueue.sync { self.ioCallbackCount }
-            let signal = self.ioQueue.sync { self.ioFramesWithSignal }
+            let callbacks = OSAtomicAdd64Barrier(0, &self.ioCallbackCount)
+            let signal = OSAtomicAdd64Barrier(0, &self.ioFramesWithSignal)
             self.logger.info("Health: callbacks=\(callbacks) signalBuffers=\(signal)")
             if callbacks == 0 {
                 self.lastSetupDetail = "IOProc never called — HAL plugin conflict likely (Boom/DeskFx)."
@@ -643,7 +643,7 @@ final class SystemAudioEQEngine {
         inData: UnsafePointer<AudioBufferList>,
         outData: UnsafeMutablePointer<AudioBufferList>
     ) {
-        ioCallbackCount &+= 1
+        OSAtomicIncrement64Barrier(&ioCallbackCount)
         let inBuffers = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: inData))
         let outBuffers = UnsafeMutableAudioBufferListPointer(outData)
 
@@ -667,11 +667,8 @@ final class SystemAudioEQEngine {
             let probe = min(frames, 64)
             for i in 0..<probe { energy += abs(samples[i]) }
             if energy > 0.0001 {
-                ioFramesWithSignal &+= 1
-                if !hasScheduledTapAudioPublication {
-                    hasScheduledTapAudioPublication = true
-                    DispatchQueue.main.async { [weak self] in self?.isReceivingTapAudio = true }
-                }
+                OSAtomicIncrement64Barrier(&ioFramesWithSignal)
+                OSAtomicCompareAndSwap32Barrier(0, 1, &tapSignalPublicationPending)
             }
         }
 
@@ -695,8 +692,10 @@ final class SystemAudioEQEngine {
         outBuffers: UnsafeMutableAudioBufferListPointer,
         nonInterleaved: Bool
     ) {
-        guard !analysisPending, let first = outBuffers.first, first.mData != nil else {
-            droppedAnalysisBuffers &+= 1
+        guard OSAtomicAdd32Barrier(0, &analysisReadySlot) == -1,
+              let first = outBuffers.first,
+              first.mData != nil else {
+            OSAtomicIncrement64Barrier(&droppedAnalysisBuffers)
             return
         }
         let channels = min(2, nonInterleaved ? outBuffers.count : max(1, Int(first.mNumberChannels)))
@@ -727,18 +726,33 @@ final class SystemAudioEQEngine {
         analysisAccumulatedFrames += copyFrames
         guard analysisAccumulatedFrames >= analysisBufferCapacity else { return }
 
-        analysisPending = true
-        analysisWorkSlot = slot
         analysisWorkChannels = channels
         analysisWorkFrames = analysisBufferCapacity
         analysisWorkSampleRate = sampleRate
         analysisSlot = (analysisSlot + 1) % 2
         analysisAccumulatedFrames = 0
-        analysisWakeup.signal()
+        OSAtomicCompareAndSwap32Barrier(-1, Int32(slot), &analysisReadySlot)
     }
 
-    private func processPendingAnalysis() {
-        let buffers = analysisBuffers[analysisWorkSlot]
+    private func drainRealtimePublications() {
+        if OSAtomicCompareAndSwap32Barrier(1, 0, &tapSignalPublicationPending) {
+            DispatchQueue.main.async { [weak self] in self?.isReceivingTapAudio = true }
+        }
+        if OSAtomicCompareAndSwap32Barrier(1, 0, &safetyTripPublicationPending) {
+            logger.warning("Feedback protection tripped")
+            DispatchQueue.main.async { [weak self] in
+                self?.didTripFeedbackProtection = true
+                self?.onSafetyTrip?()
+            }
+        }
+        let readySlot = OSAtomicAdd32Barrier(0, &analysisReadySlot)
+        let slot = OSAtomicCompareAndSwap32Barrier(readySlot, -1, &analysisReadySlot) ? Int(readySlot) : -1
+        guard slot >= 0 else { return }
+        processPendingAnalysis(slot: slot)
+    }
+
+    private func processPendingAnalysis(slot: Int) {
+        let buffers = analysisBuffers[slot]
         let channels = analysisWorkChannels
         let frames = analysisWorkFrames
         let rate = analysisWorkSampleRate
@@ -751,7 +765,6 @@ final class SystemAudioEQEngine {
         if let result {
             DispatchQueue.main.async { [weak self] in self?.onAnalysis?(result) }
         }
-        ioQueue.async { [weak self] in self?.analysisPending = false }
     }
 
     private func isNonInterleaved(_ buffers: UnsafeMutableAudioBufferListPointer) -> Bool {
@@ -905,11 +918,7 @@ final class SystemAudioEQEngine {
             silence(outBuffers)
             if !safetyTripNotified {
                 safetyTripNotified = true
-                logger.warning("Feedback protection tripped")
-                DispatchQueue.main.async { [weak self] in
-                    self?.didTripFeedbackProtection = true
-                    self?.onSafetyTrip?()
-                }
+                OSAtomicCompareAndSwap32Barrier(0, 1, &safetyTripPublicationPending)
             }
         }
     }

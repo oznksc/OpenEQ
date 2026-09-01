@@ -78,6 +78,9 @@ The most critical aspect of audio applications is preventing audio dropouts (gli
 ### 4.1. Real-Time Thread Constraints (Profiling with XCTest)
 *   **Zero Heap Allocations:** Under no circumstances should memory allocations (`malloc`, Swift array resizing, string concatenations) occur inside tap callbacks or `SystemAudioEQEngine` IOProc callbacks.
 *   **No Locks:** Avoid using mutexes or dispatching synchronously to GCD queues within processing callbacks. Use lock-free ring buffers or atomic variables for thread communications.
+*   **No Callback Publication:** Logging, UI updates, analysis delivery, and safety notifications are published by the analysis worker. The IO callback only writes preallocated buffers and lock-free flags/counters.
+*   **Static Contract:** Unit tests inspect every method reachable from `handleIO` and fail if dispatch, logging, allocation, waiting, or collection growth is introduced.
+*   **Deadline Margin:** With 31 active bands and a 256-frame buffer at 48 kHz, the DSP hot path's 99th-percentile duration must remain below 25% of the callback budget.
 *   **FFT Performance Benchmarks:** Measure that a 1024-point vDSP FFT conversion and spectrum binning completes in under 1 ms (preferably < 0.1 ms) using `self.measure`.
 
 ```swift
