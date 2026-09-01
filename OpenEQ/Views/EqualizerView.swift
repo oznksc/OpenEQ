@@ -15,13 +15,13 @@ struct EqualizerView: View {
                     StudioLED(isOn: viewModel.isEnabled, activeColor: OpenEQTheme.accentCyan, size: 9)
                     Text("\(viewModel.eqMode.title) EQ")
                         .font(.system(size: 17, weight: .bold, design: .rounded))
-
-                    spectrumDisplayButton
                 }
 
                 activeHeadphoneBadge
 
                 Spacer(minLength: 8)
+
+                spectrumDisplayButton
 
                 if viewModel.eqMode == .graphic {
                     bandCountButton
@@ -73,36 +73,89 @@ struct EqualizerView: View {
         }
     }
 
+    @ViewBuilder
     private var spectrumDisplayButton: some View {
+        if #available(macOS 26.0, *) {
+            GlassEffectContainer(spacing: 4) {
+                spectrumDisplayAction
+                    .padding(2.5)
+                    .glassEffect(.regular.interactive(), in: .capsule)
+            }
+        } else {
+            spectrumDisplayAction
+                .padding(2.5)
+                .background(.ultraThinMaterial, in: Capsule())
+                .overlay {
+                    Capsule().stroke(Color.white.opacity(0.08), lineWidth: 1)
+                }
+        }
+    }
+
+    private var spectrumDisplayAction: some View {
         Button {
             isShowingSpectrumDisplayActions = true
         } label: {
-            Image(systemName: spectrumDisplayMode.icon)
-                .font(.system(size: 11, weight: .bold))
-                .foregroundStyle(OpenEQTheme.accentCyan)
-                .frame(width: 24, height: 24)
+            HStack(spacing: 6) {
+                Image(systemName: spectrumDisplayMode.icon)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(OpenEQTheme.accentCyan)
+                Text(spectrumDisplayMode.title)
+                    .font(.system(size: 11, weight: .medium))
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(.tertiary)
+            }
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .contentShape(Capsule())
         }
-        .buttonStyle(.bordered)
-        .controlSize(.small)
+        .buttonStyle(.plain)
         .help("Spectrum display: \(spectrumDisplayMode.title)")
         .accessibilityLabel("Spectrum display")
         .accessibilityValue(spectrumDisplayMode.title)
     }
 
+    @ViewBuilder
     private var bandCountButton: some View {
+        if #available(macOS 26.0, *) {
+            GlassEffectContainer(spacing: 4) {
+                bandCountAction
+                    .padding(2.5)
+                    .glassEffect(.regular.interactive(), in: .capsule)
+            }
+        } else {
+            bandCountAction
+                .padding(2.5)
+                .background(.ultraThinMaterial, in: Capsule())
+                .overlay {
+                    Capsule().stroke(Color.white.opacity(0.08), lineWidth: 1)
+                }
+        }
+    }
+
+    private var bandCountAction: some View {
         Button {
             isShowingBandCountActions = true
         } label: {
-            HStack(spacing: 5) {
+            HStack(spacing: 6) {
+                Image(systemName: "slider.horizontal.3")
+                    .font(.system(size: 10, weight: .semibold))
                 Text(viewModel.graphicBandCount.title)
+                    .font(.system(size: 11, weight: .medium))
                 Image(systemName: "chevron.down")
                     .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(.tertiary)
             }
-            .font(.system(size: 11, weight: .bold, design: .rounded))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .contentShape(Capsule())
         }
-        .buttonStyle(.bordered)
-        .controlSize(.small)
+        .buttonStyle(.plain)
         .help("Choose graphic EQ band count")
+        .accessibilityLabel("Graphic EQ band count")
+        .accessibilityValue(viewModel.graphicBandCount.title)
     }
 
     @ViewBuilder
