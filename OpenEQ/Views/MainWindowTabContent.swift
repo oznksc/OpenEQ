@@ -187,7 +187,13 @@ private struct SpectrumBackdropView: View {
 
     var body: some View {
         ZStack(alignment: .bottomLeading) {
-            Canvas { context, size in
+            if style == .globe {
+                SpectrumGlobeView(levels: displayedLevels)
+                    .frame(width: 270, height: 270)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                    .offset(y: 72)
+            } else {
+                Canvas { context, size in
                 let count = displayedLevels.count
                 guard count > 0 else { return }
 
@@ -268,6 +274,8 @@ private struct SpectrumBackdropView: View {
                                 with: .color(Color.green.opacity(0.25 + Double(block) * 0.06))
                             )
                         }
+                    case .globe:
+                        break
                     }
 
                     if style != .aurora {
@@ -298,6 +306,7 @@ private struct SpectrumBackdropView: View {
                 baselinePath.move(to: CGPoint(x: 0, y: baseline))
                 baselinePath.addLine(to: CGPoint(x: size.width, y: baseline))
                 context.stroke(baselinePath, with: .color(style.accentColor.opacity(0.2)), lineWidth: 1)
+            }
             }
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 7) {

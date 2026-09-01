@@ -7,6 +7,7 @@ enum SpectrumVisualizationStyle: String, CaseIterable, Identifiable {
     case prism
     case orbit
     case matrix
+    case globe
 
     var id: Self { self }
 
@@ -18,6 +19,7 @@ enum SpectrumVisualizationStyle: String, CaseIterable, Identifiable {
         case .prism: "Prism"
         case .orbit: "Orbit"
         case .matrix: "Matrix"
+        case .globe: "Globe"
         }
     }
 
@@ -29,6 +31,7 @@ enum SpectrumVisualizationStyle: String, CaseIterable, Identifiable {
         case .prism: "sparkles"
         case .orbit: "circle.dotted"
         case .matrix: "square.grid.3x3.fill"
+        case .globe: "circle.hexagongrid.fill"
         }
     }
 
@@ -40,6 +43,7 @@ enum SpectrumVisualizationStyle: String, CaseIterable, Identifiable {
         case .prism: .blue
         case .orbit: .pink
         case .matrix: .green
+        case .globe: .indigo
         }
     }
 }
