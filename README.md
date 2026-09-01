@@ -15,7 +15,12 @@ OpenEQ is a lightweight desktop EQ for:
 
 ### Local equalizer (stable)
 - **10-band & 31-band** graphic EQ (ISO frequencies)
-- **5-band parametric EQ** with **interactive curve** (drag nodes, scroll for Q)
+- **5-band parametric EQ** with **interactive curve** (drag nodes, scroll for Q, double-click for direct numerical entry with `k`/`Hz` suffixes)
+- **Layered EQ Architecture:** 3-tier cascade (**Calibration** $\rightarrow$ **Target Curve** $\rightarrow$ **Session Tuning**)
+- **Level-Matched A/B Comparison:** Automatic RMS offset detection with click-free crossfades to eliminate loudness bias
+- **True-Peak (dBTP) Metering:** ITU-R BS.1770 compliant 4x polyphase oversampling for inter-sample peak detection
+- **Auto Headroom:** Dynamic anti-clipping preamp attenuation control (Auto/Manual)
+- **Undo / Redo & A/B/C Snapshot Slots:** Complete parameter history stack and 3 instant comparative recall slots
 - Preamp (`-24` … `+24` dB), EQ bypass, volume boost up to 200%
 - **Dynamics:** compressor + stereo balance; peak limiter always on
 - **AUv3 insert** on the local playback chain (effect plugins)
