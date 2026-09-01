@@ -543,6 +543,31 @@ final class OpenEQTests: XCTestCase {
         }
     }
 
+    func testSystemAudioLimiterLinksStereoGainReduction() {
+        let sampleRate = 48_000.0
+        let latency = SystemAudioDSPState.limiterLatencyFrames(for: sampleRate)
+        var left = [Float](repeating: 0.5, count: latency * 3)
+        var right = [Float](repeating: 0.5, count: latency * 3)
+        left[0] = 2
+        let dsp = SystemAudioDSPState()
+        dsp.configure(.flatPreset(), sampleRate: sampleRate)
+        dsp.isBypassed = true
+
+        left.withUnsafeMutableBufferPointer { leftBuffer in
+            right.withUnsafeMutableBufferPointer { rightBuffer in
+                dsp.processStereo(
+                    left: leftBuffer.baseAddress!,
+                    right: rightBuffer.baseAddress!,
+                    frames: leftBuffer.count
+                )
+            }
+        }
+
+        XCTAssertEqual(left[latency], 0.98, accuracy: 1e-6)
+        XCTAssertEqual(right[latency], 0.245, accuracy: 1e-6)
+        XCTAssertEqual(left[latency + 1], right[latency + 1], accuracy: 1e-6)
+    }
+
     func testSystemAudioDSPParametricBoostMatchesRequestedGain() {
         let band = EQBand(frequency: 1000, gain: 6, q: 1, filterType: .parametric)
         let preset = EQPreset(name: "1 kHz +6 dB", mode: .parametric, bands: [band])

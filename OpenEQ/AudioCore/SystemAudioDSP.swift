@@ -296,6 +296,64 @@ private struct LookAheadLimiterState {
     }
 }
 
+private struct LinkedLookAheadLimiterState {
+    private var leftDelay = [Float](repeating: 0, count: SystemAudioLimiter.maximumLookAheadFrames)
+    private var rightDelay = [Float](repeating: 0, count: SystemAudioLimiter.maximumLookAheadFrames)
+    private var writeIndex = 0
+    private var delayFrames = 48
+    private var holdFrames = 0
+    private var gain: Float = 1
+    private var releaseCoefficient: Float = 0.000_416_58
+
+    mutating func configure(sampleRate: Double) {
+        let newDelayFrames = SystemAudioDSPState.limiterLatencyFrames(for: sampleRate)
+        releaseCoefficient = Float(1 - exp(-1 / (SystemAudioLimiter.releaseSeconds * sampleRate)))
+        guard newDelayFrames != delayFrames else { return }
+        delayFrames = newDelayFrames
+        reset()
+    }
+
+    mutating func process(
+        left: UnsafeMutablePointer<Float>,
+        right: UnsafeMutablePointer<Float>,
+        frames: Int
+    ) {
+        let ceiling = SystemAudioLimiter.ceiling
+        for frame in 0..<frames {
+            let leftInput = left[frame]
+            let rightInput = right[frame]
+            let delayedLeft = leftDelay[writeIndex]
+            let delayedRight = rightDelay[writeIndex]
+            leftDelay[writeIndex] = leftInput
+            rightDelay[writeIndex] = rightInput
+            writeIndex += 1
+            if writeIndex == delayFrames { writeIndex = 0 }
+
+            let magnitude = max(abs(leftInput), abs(rightInput))
+            let requiredGain = magnitude > ceiling ? ceiling / magnitude : 1
+            if requiredGain < gain {
+                gain = requiredGain
+                holdFrames = delayFrames + 1
+            } else if holdFrames > 0 {
+                holdFrames -= 1
+            } else {
+                gain += (1 - gain) * releaseCoefficient
+            }
+
+            left[frame] = max(-ceiling, min(ceiling, delayedLeft * gain))
+            right[frame] = max(-ceiling, min(ceiling, delayedRight * gain))
+        }
+    }
+
+    mutating func reset() {
+        leftDelay.withUnsafeMutableBufferPointer { $0.initialize(repeating: 0) }
+        rightDelay.withUnsafeMutableBufferPointer { $0.initialize(repeating: 0) }
+        writeIndex = 0
+        holdFrames = 0
+        gain = 1
+    }
+}
+
 final class SystemAudioDSPState {
     private static let sectionCount = 31
     private let biquadCascade = VDSPBiquadCascade(sectionCount: sectionCount)
@@ -303,6 +361,7 @@ final class SystemAudioDSPState {
     private var rightControl = DSPChannelControlState()
     private var leftLimiter = LookAheadLimiterState()
     private var rightLimiter = LookAheadLimiterState()
+    private var linkedLimiter = LinkedLookAheadLimiterState()
     var isBypassed = false
     var isEmergencyMuted = false
 
@@ -315,6 +374,7 @@ final class SystemAudioDSPState {
         rightControl.configureTiming(sampleRate: safeSampleRate)
         leftLimiter.configure(sampleRate: safeSampleRate)
         rightLimiter.configure(sampleRate: safeSampleRate)
+        linkedLimiter.configure(sampleRate: safeSampleRate)
         leftControl.startPreampTransition(to: preampTarget, durationFrames: preampTransitionFrames)
         rightControl.startPreampTransition(to: preampTarget, durationFrames: preampTransitionFrames)
         for index in 0..<Self.sectionCount {
@@ -329,6 +389,7 @@ final class SystemAudioDSPState {
     func reset() {
         leftLimiter.reset()
         rightLimiter.reset()
+        linkedLimiter.reset()
         isBypassed = false
         isEmergencyMuted = false
         leftControl.reset()
@@ -356,6 +417,24 @@ final class SystemAudioDSPState {
         } else {
             rightLimiter.process(samples, frames: frames)
         }
+    }
+
+    func processStereo(
+        left: UnsafeMutablePointer<Float>,
+        right: UnsafeMutablePointer<Float>,
+        frames: Int
+    ) {
+        if isEmergencyMuted {
+            memset(left, 0, frames * MemoryLayout<Float>.size)
+            memset(right, 0, frames * MemoryLayout<Float>.size)
+            return
+        }
+
+        if !isBypassed {
+            leftControl.process(left, frames: frames, channel: 0, cascade: biquadCascade)
+            rightControl.process(right, frames: frames, channel: 1, cascade: biquadCascade)
+        }
+        linkedLimiter.process(left: left, right: right, frames: frames)
     }
 
     static func limiterLatencyFrames(for sampleRate: Double) -> Int {

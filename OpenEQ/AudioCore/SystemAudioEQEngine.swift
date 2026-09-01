@@ -779,6 +779,9 @@ final class SystemAudioEQEngine {
     ) {
         let channels = min(inBuffers.count, outBuffers.count, max(1, Int(channelCount)))
         var primaryFrames = 0
+        var left: UnsafeMutablePointer<Float>?
+        var right: UnsafeMutablePointer<Float>?
+        var stereoFrames = 0
         for channel in 0..<channels {
             guard let inputData = inBuffers[channel].mData,
                   let outputData = outBuffers[channel].mData else { continue }
@@ -787,8 +790,21 @@ final class SystemAudioEQEngine {
             guard frames > 0 else { continue }
             memcpy(outputData, inputData, Int(copyBytes))
             let destination = outputData.assumingMemoryBound(to: Float.self)
-            dspState.process(destination, frames: frames, channel: channel)
-            if channel == 0 { primaryFrames = frames }
+            if channel == 0 {
+                left = destination
+                primaryFrames = frames
+                stereoFrames = frames
+            } else if channel == 1 {
+                right = destination
+                stereoFrames = min(stereoFrames, frames)
+            } else {
+                dspState.process(destination, frames: frames, channel: channel)
+            }
+        }
+        if let left, let right {
+            dspState.processStereo(left: left, right: right, frames: stereoFrames)
+        } else if let left {
+            dspState.process(left, frames: primaryFrames, channel: 0)
         }
         applyFeedbackGuard(outBuffers: outBuffers, nonInterleaved: true, frames: primaryFrames)
     }
@@ -823,10 +839,12 @@ final class SystemAudioEQEngine {
         let destination = outData.assumingMemoryBound(to: Float.self)
         for channel in 0..<channels {
             guard let scratch = deinterleaveScratch[channel] else { continue }
-            for frame in 0..<frames {
-                scratch[frame] = source[frame * inChannels + channel]
-            }
-            dspState.process(scratch, frames: frames, channel: channel)
+            for frame in 0..<frames { scratch[frame] = source[frame * inChannels + channel] }
+        }
+        if channels == 2, let left = deinterleaveScratch[0], let right = deinterleaveScratch[1] {
+            dspState.processStereo(left: left, right: right, frames: frames)
+        } else if let mono = deinterleaveScratch[0] {
+            dspState.process(mono, frames: frames, channel: 0)
         }
         for channel in 0..<channels {
             guard let scratch = deinterleaveScratch[channel] else { continue }
@@ -865,7 +883,11 @@ final class SystemAudioEQEngine {
             guard let inputData = inBuffers[channel].mData,
                   let scratch = deinterleaveScratch[channel] else { continue }
             memcpy(scratch, inputData, n * MemoryLayout<Float>.size)
-            dspState.process(scratch, frames: n, channel: channel)
+        }
+        if channels == 2, let left = deinterleaveScratch[0], let right = deinterleaveScratch[1] {
+            dspState.processStereo(left: left, right: right, frames: n)
+        } else if let mono = deinterleaveScratch[0] {
+            dspState.process(mono, frames: n, channel: 0)
         }
         for channel in 0..<channels {
             guard let scratch = deinterleaveScratch[channel] else { continue }
@@ -886,6 +908,9 @@ final class SystemAudioEQEngine {
         let frames = Int(inBuffers[0].mDataByteSize) / (MemoryLayout<Float>.size * inChannels)
         guard frames > 0 else { return }
         let source = inData.assumingMemoryBound(to: Float.self)
+        var left: UnsafeMutablePointer<Float>?
+        var right: UnsafeMutablePointer<Float>?
+        var stereoFrames = frames
         for channel in 0..<channels {
             guard let outputData = outBuffers[channel].mData else { continue }
             let outFrames = Int(outBuffers[channel].mDataByteSize) / MemoryLayout<Float>.size
@@ -894,7 +919,18 @@ final class SystemAudioEQEngine {
             for frame in 0..<n {
                 destination[frame] = source[frame * inChannels + channel]
             }
-            dspState.process(destination, frames: n, channel: channel)
+            if channel == 0 {
+                left = destination
+                stereoFrames = n
+            } else {
+                right = destination
+                stereoFrames = min(stereoFrames, n)
+            }
+        }
+        if let left, let right {
+            dspState.processStereo(left: left, right: right, frames: stereoFrames)
+        } else if let left {
+            dspState.process(left, frames: stereoFrames, channel: 0)
         }
         let primaryFrames = Int(outBuffers.first?.mDataByteSize ?? 0) / MemoryLayout<Float>.size
         applyFeedbackGuard(outBuffers: outBuffers, nonInterleaved: true, frames: primaryFrames)
