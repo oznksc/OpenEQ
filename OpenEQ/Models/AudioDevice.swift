@@ -20,6 +20,8 @@ struct AudioDevice: Identifiable, Equatable {
     let isDefaultOutput: Bool
     let sampleRate: Double?
     let channelCount: Int?
+    var volume: Float? = nil
+    var isMuted: Bool? = nil
 
     var isBlackHole: Bool {
         name.localizedCaseInsensitiveContains("BlackHole")

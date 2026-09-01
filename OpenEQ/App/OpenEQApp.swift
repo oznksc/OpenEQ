@@ -84,7 +84,7 @@ struct OpenEQApp: App {
                 }
             }
         )) {
-            MenuBarView(viewModel: viewModel)
+            MenuBarAudioHubView(viewModel: viewModel)
         } label: {
             Image(systemName: viewModel.isEnabled ? "slider.vertical.3" : "speaker.slash")
         }

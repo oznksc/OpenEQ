@@ -1,4 +1,5 @@
 import AppKit
+import CoreAudio
 import Foundation
 import Observation
 
@@ -305,6 +306,18 @@ final class SystemAudioManager {
         isExternalLoopbackBypassed = bypassed
         externalLoopbackEngine.setBypassed(bypassed)
         isExternalLoopbackBypassed = externalLoopbackEngine.isBypassed
+    }
+
+    func setDeviceVolume(_ volume: Float, for device: AudioDevice) {
+        let scope: AudioObjectPropertyScope = device.isOutput ? kAudioDevicePropertyScopeOutput : kAudioDevicePropertyScopeInput
+        deviceManager.setVolume(volume, for: device.id, scope: scope)
+        syncDeviceSnapshot()
+    }
+
+    func setDeviceMute(_ isMuted: Bool, for device: AudioDevice) {
+        let scope: AudioObjectPropertyScope = device.isOutput ? kAudioDevicePropertyScopeOutput : kAudioDevicePropertyScopeInput
+        deviceManager.setMute(isMuted, for: device.id, scope: scope)
+        syncDeviceSnapshot()
     }
 
     func openSystemAudioPrivacySettings() {

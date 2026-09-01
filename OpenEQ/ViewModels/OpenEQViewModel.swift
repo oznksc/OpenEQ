@@ -243,6 +243,9 @@ final class OpenEQViewModel {
     private let autoEQCatalog = AutoEQCatalog()
     private let listeningComfortEngine = ListeningComfortEngine()
     let processEnumerator = AudioProcessEnumerator()
+    var appAudioProcessManager = AppAudioProcessManager()
+    var isGlobalMultiOutputEnabled: Bool = false
+    var isPerAppVolumeEnabled: Bool = true
     private var graphicBands: [EQBand]
     private var parametricBands: [EQBand]
     private var listeningComfortAutoSootheCooldown: TimeInterval = 0
