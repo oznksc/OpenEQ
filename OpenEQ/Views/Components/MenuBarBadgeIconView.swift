@@ -29,11 +29,11 @@ private enum MenuBarBadgeRenderer {
         isEnabled: Bool,
         isClipping: Bool
     ) -> NSImage {
-        let size = NSSize(width: 96, height: 18)
+        let size = NSSize(width: 48, height: 18)
         let image = NSImage(size: size)
-        let indices = Array(stride(from: 0, to: levels.count, by: 3)).prefix(22)
-        let barWidth: CGFloat = 3
-        let spacing: CGFloat = 1.2
+        let indices = Array(stride(from: 0, to: levels.count, by: 5)).prefix(12)
+        let barWidth: CGFloat = 2
+        let spacing: CGFloat = 1.5
         let totalWidth = CGFloat(indices.count) * barWidth + CGFloat(max(0, indices.count - 1)) * spacing
         let startX = (size.width - totalWidth) / 2
         let alpha: CGFloat = isEnabled ? 1 : 0.42
@@ -44,7 +44,7 @@ private enum MenuBarBadgeRenderer {
 
         for (offset, index) in indices.enumerated() {
             let level = displayLevel(levels: levels, index: index, offset: offset, isActive: isActive)
-            let height = max(4, size.height * level)
+            let height = max(2, size.height * level)
             let rect = NSRect(
                 x: startX + CGFloat(offset) * (barWidth + spacing),
                 y: (size.height - height) / 2,
@@ -54,7 +54,7 @@ private enum MenuBarBadgeRenderer {
             barColor(level: level, isActive: isActive, isClipping: isClipping)
                 .withAlphaComponent(alpha)
                 .setFill()
-            NSBezierPath(roundedRect: rect, xRadius: 1.5, yRadius: 1.5).fill()
+            NSBezierPath(roundedRect: rect, xRadius: 1, yRadius: 1).fill()
         }
 
         image.unlockFocus()
@@ -64,9 +64,9 @@ private enum MenuBarBadgeRenderer {
 
     private static func displayLevel(levels: SpectrumLevels, index: Int, offset: Int, isActive: Bool) -> CGFloat {
         if isActive {
-            return CGFloat(max(0.12, min(1, levels[index])))
+            return CGFloat(max(0.14, min(1, levels[index])))
         }
-        return 0.22 + CGFloat((offset % 5)) * 0.055
+        return 0.20 + CGFloat((offset % 4)) * 0.045
     }
 
     private static func barColor(level: CGFloat, isActive: Bool, isClipping: Bool) -> NSColor {
