@@ -427,4 +427,26 @@ extension OpenEQViewModel {
         systemAudioManager.setExternalLoopbackBypassed(isBypassed)
         syncSystemAudioState()
     }
+
+    func setMenuBarDeviceVolume(_ volume: Float, for device: AudioDevice) {
+        systemAudioManager.setDeviceVolume(volume, for: device)
+        syncSystemAudioState()
+    }
+
+    func setMenuBarDeviceMute(_ isMuted: Bool, for device: AudioDevice) {
+        systemAudioManager.setDeviceMute(isMuted, for: device)
+        syncSystemAudioState()
+    }
+
+    func setGlobalMultiOutputEnabled(_ enabled: Bool) {
+        isGlobalMultiOutputEnabled = enabled
+        let outputUIDs = Set(availableOutputDevices.compactMap(\.uid))
+        for channel in appAudioProcessManager.channels {
+            appAudioProcessManager.setTargetOutputUIDs(
+                enabled ? outputUIDs : [],
+                isMulti: enabled,
+                for: channel.id
+            )
+        }
+    }
 }
