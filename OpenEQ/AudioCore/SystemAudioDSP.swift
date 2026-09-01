@@ -33,7 +33,7 @@ private struct SmoothingCoefficients {
     func interpolatedCoeffs() -> BiquadCoefficients {
         guard remaining > 0 else { return current }
         let t = 1 - Float(remaining) / Float(Self.duration)
-        return lerp(current, target, t)
+        return lerp(start, target, t)
     }
 
     mutating func advance(frames: Int) {
@@ -126,6 +126,109 @@ private final class VDSPBiquadCascade {
     }
 }
 
+private struct SmoothedGain {
+    static let duration = 256
+    private var start: Float = 1
+    private var current: Float = 1
+    private var target: Float = 1
+    private var remaining = 0
+
+    mutating func startTransition(to newTarget: Float) {
+        current = value
+        start = current
+        target = newTarget
+        remaining = Self.duration
+    }
+
+    var value: Float {
+        guard remaining > 0 else { return current }
+        let progress = 1 - Float(remaining) / Float(Self.duration)
+        return start + (target - start) * progress
+    }
+
+    mutating func advance(frames: Int) {
+        guard remaining > 0 else { return }
+        if frames >= remaining {
+            current = target
+            remaining = 0
+        } else {
+            remaining -= frames
+            current = value
+        }
+    }
+
+    mutating func reset() {
+        self = SmoothedGain()
+    }
+}
+
+private struct DSPChannelControlState {
+    private static let coefficientUpdateInterval = 32
+    private var smoothingCoeffs = Array(repeating: SmoothingCoefficients(), count: 31)
+    private var interpolatedCoeffs = Array(repeating: BiquadCoefficients.identity, count: 31)
+    private var preamp = SmoothedGain()
+    private var framesUntilCoefficientUpdate = 0
+    private var hasActiveFilters = false
+
+    mutating func startFilterTransition(index: Int, to coefficients: BiquadCoefficients) {
+        smoothingCoeffs[index].startTransition(to: coefficients)
+        framesUntilCoefficientUpdate = 0
+    }
+
+    mutating func startPreampTransition(to target: Float) {
+        preamp.startTransition(to: target)
+        framesUntilCoefficientUpdate = 0
+    }
+
+    mutating func process(
+        _ samples: UnsafeMutablePointer<Float>,
+        frames: Int,
+        channel: Int,
+        cascade: VDSPBiquadCascade
+    ) {
+        var offset = 0
+        while offset < frames {
+            if framesUntilCoefficientUpdate == 0 {
+                hasActiveFilters = false
+                for index in smoothingCoeffs.indices {
+                    let coefficients = smoothingCoeffs[index].interpolatedCoeffs()
+                    interpolatedCoeffs[index] = coefficients
+                    if !coefficients.isIdentity { hasActiveFilters = true }
+                }
+                if hasActiveFilters {
+                    cascade.updateCoefficients(interpolatedCoeffs)
+                }
+                framesUntilCoefficientUpdate = Self.coefficientUpdateInterval
+            }
+
+            let chunkFrames = min(frames - offset, framesUntilCoefficientUpdate)
+            let chunk = samples.advanced(by: offset)
+            let gainValue = preamp.value
+            if abs(gainValue - 1) > 0.0001 {
+                var gain = gainValue
+                vDSP_vsmul(chunk, 1, &gain, chunk, 1, vDSP_Length(chunkFrames))
+            }
+            if hasActiveFilters {
+                cascade.process(chunk, frames: chunkFrames, channel: channel)
+            }
+            for index in smoothingCoeffs.indices {
+                smoothingCoeffs[index].advance(frames: chunkFrames)
+            }
+            preamp.advance(frames: chunkFrames)
+            framesUntilCoefficientUpdate -= chunkFrames
+            offset += chunkFrames
+        }
+    }
+
+    mutating func reset() {
+        smoothingCoeffs = Array(repeating: SmoothingCoefficients(), count: 31)
+        interpolatedCoeffs = Array(repeating: .identity, count: 31)
+        preamp.reset()
+        framesUntilCoefficientUpdate = 0
+        hasActiveFilters = false
+    }
+}
+
 private enum SystemAudioLimiter {
     static let ceiling: Float = 0.98
     static let attack: Float = 0.35
@@ -134,41 +237,35 @@ private enum SystemAudioLimiter {
 
 final class SystemAudioDSPState {
     private static let sectionCount = 31
-    private var smoothingCoeffs = Array(repeating: SmoothingCoefficients(), count: 31)
-    private var currentInterpolated: [BiquadCoefficients] = Array(repeating: .identity, count: 31)
     private let biquadCascade = VDSPBiquadCascade(sectionCount: sectionCount)
-    private var hasActiveFilters = false
-    private var preampLinear: Float = 1
-    private var targetPreampLinear: Float = 1
+    private var leftControl = DSPChannelControlState()
+    private var rightControl = DSPChannelControlState()
     private var leftLimiterGain: Float = 1
     private var rightLimiterGain: Float = 1
     var isBypassed = false
     var isEmergencyMuted = false
 
     func configure(_ preset: EQPreset, sampleRate: Double) {
-        targetPreampLinear = pow(10, preset.preamp / 20)
-        for index in smoothingCoeffs.indices {
-            guard index < preset.bands.count else {
-                smoothingCoeffs[index].startTransition(to: .identity)
-                continue
-            }
-            smoothingCoeffs[index].startTransition(
-                to: Self.makeCoefficients(for: preset.bands[index], sampleRate: Float(sampleRate))
-            )
+        let preampTarget = pow(10, preset.preamp / 20)
+        leftControl.startPreampTransition(to: preampTarget)
+        rightControl.startPreampTransition(to: preampTarget)
+        for index in 0..<Self.sectionCount {
+            let coefficients = index < preset.bands.count
+                ? Self.makeCoefficients(for: preset.bands[index], sampleRate: Float(sampleRate))
+                : .identity
+            leftControl.startFilterTransition(index: index, to: coefficients)
+            rightControl.startFilterTransition(index: index, to: coefficients)
         }
     }
 
     func reset() {
-        preampLinear = 1
-        targetPreampLinear = 1
         leftLimiterGain = 1
         rightLimiterGain = 1
         isBypassed = false
         isEmergencyMuted = false
-        smoothingCoeffs = Array(repeating: SmoothingCoefficients(), count: 31)
-        currentInterpolated = Array(repeating: .identity, count: 31)
-        hasActiveFilters = false
-        biquadCascade.updateCoefficients(currentInterpolated)
+        leftControl.reset()
+        rightControl.reset()
+        biquadCascade.updateCoefficients(Array(repeating: .identity, count: Self.sectionCount))
         biquadCascade.reset()
     }
 
@@ -180,30 +277,9 @@ final class SystemAudioDSPState {
 
         if !isBypassed {
             if channel == 0 {
-                let preampDelta = targetPreampLinear - preampLinear
-                if abs(preampDelta) > 0.00001 {
-                    preampLinear += preampDelta * min(1, Float(frames) / 256)
-                } else {
-                    preampLinear = targetPreampLinear
-                }
-
-                for index in smoothingCoeffs.indices {
-                    currentInterpolated[index] = smoothingCoeffs[index].interpolatedCoeffs()
-                    smoothingCoeffs[index].advance(frames: frames)
-                }
-                hasActiveFilters = currentInterpolated.contains { !$0.isIdentity }
-                if hasActiveFilters {
-                    biquadCascade.updateCoefficients(currentInterpolated)
-                }
-            }
-
-            if abs(preampLinear - 1) > 0.0001 {
-                var gain = preampLinear
-                vDSP_vsmul(samples, 1, &gain, samples, 1, vDSP_Length(frames))
-            }
-
-            if hasActiveFilters {
-                biquadCascade.process(samples, frames: frames, channel: channel)
+                leftControl.process(samples, frames: frames, channel: channel, cascade: biquadCascade)
+            } else {
+                rightControl.process(samples, frames: frames, channel: channel, cascade: biquadCascade)
             }
         }
 

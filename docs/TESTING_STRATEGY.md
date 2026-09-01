@@ -51,6 +51,8 @@ Unit tests are written using the XCTest framework. DSP equations must be verifie
 *   **Engine Parity:** The system vDSP engine and `AVAudioUnitEQ` must agree at the parametric band center within `0.25 dB` after converting Q to octave bandwidth.
 *   **Linearity:** Below the limiter threshold, residual harmonic distortion must remain below `-70 dB` for the reference probe.
 *   **Stress Safety:** Maximum multi-band boost plus preamp must produce finite samples bounded to the output range.
+*   **Buffer Invariance:** Contiguous, fixed-size, and irregular host buffers must produce matching output while parameters are smoothing.
+*   **Stereo Isolation:** Identical stereo inputs must remain matched during transitions, and filter history from one channel must never leak into the other.
 
 ---
 

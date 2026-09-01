@@ -608,6 +608,69 @@ final class OpenEQTests: XCTestCase {
         }
     }
 
+    func testSystemAudioDSPIsIndependentOfHostBufferFragmentation() {
+        let input = sineWave(frequency: 997, frameCount: 16_384, amplitude: 0.08)
+        let bands = [
+            EQBand(frequency: 120, gain: 5, q: 0.7, filterType: .lowShelf),
+            EQBand(frequency: 1000, gain: -4, q: 1.4, filterType: .parametric),
+            EQBand(frequency: 8000, gain: 3, q: 0.8, filterType: .highShelf)
+        ]
+        let preset = EQPreset(name: "Fragmentation", mode: .parametric, bands: bands, preamp: -2)
+        let contiguous = processSystemDSP(input, preset: preset, chunkPattern: [input.count])
+        let fixed = processSystemDSP(input, preset: preset, chunkPattern: [256])
+        let irregular = processSystemDSP(input, preset: preset, chunkPattern: [7, 127, 509, 31, 1024, 3, 211])
+
+        XCTAssertLessThan(maximumDifference(contiguous, fixed), 1e-6)
+        XCTAssertLessThan(maximumDifference(contiguous, irregular), 5e-4)
+    }
+
+    func testSystemAudioDSPStereoChannelsRemainMatchedDuringSmoothing() {
+        let input = sineWave(frequency: 1000, frameCount: 8192, amplitude: 0.08)
+        let band = EQBand(frequency: 1000, gain: 12, q: 2, filterType: .parametric)
+        let preset = EQPreset(name: "Stereo smoothing", mode: .parametric, bands: [band], preamp: -3)
+        let dsp = SystemAudioDSPState()
+        dsp.configure(preset, sampleRate: 48_000)
+        let frameCount = input.count
+        var left = input
+        var right = input
+        left.withUnsafeMutableBufferPointer { leftBuffer in
+            right.withUnsafeMutableBufferPointer { rightBuffer in
+                var offset = 0
+                while offset < frameCount {
+                    let frames = min(256, frameCount - offset)
+                    dsp.process(leftBuffer.baseAddress! + offset, frames: frames, channel: 0)
+                    dsp.process(rightBuffer.baseAddress! + offset, frames: frames, channel: 1)
+                    offset += frames
+                }
+            }
+        }
+
+        XCTAssertLessThan(maximumDifference(left, right), 1e-6)
+    }
+
+    func testSystemAudioDSPChannelStateDoesNotLeakAcrossStereoChannels() {
+        var left = [Float](repeating: 0, count: 4096)
+        var right = [Float](repeating: 0, count: 4096)
+        left[1024] = 0.5
+        let preset = EQPreset(
+            name: "State isolation",
+            mode: .parametric,
+            bands: [EQBand(frequency: 500, gain: 12, q: 4)]
+        )
+        let dsp = SystemAudioDSPState()
+        dsp.configure(preset, sampleRate: 48_000)
+        let frameCount = left.count
+        left.withUnsafeMutableBufferPointer { leftBuffer in
+            right.withUnsafeMutableBufferPointer { rightBuffer in
+                dsp.process(leftBuffer.baseAddress!, frames: frameCount, channel: 0)
+                dsp.process(rightBuffer.baseAddress!, frames: frameCount, channel: 1)
+            }
+        }
+
+        XCTAssertEqual(right.map(abs).max(), 0)
+        XCTAssertGreaterThan(left.dropFirst(1025).map(abs).max() ?? 0, 0)
+    }
+
     private func sineWave(
         frequency: Double,
         frameCount: Int,
@@ -637,6 +700,32 @@ final class OpenEQTests: XCTestCase {
             }
         }
         return output
+    }
+
+    private func processSystemDSP(
+        _ input: [Float],
+        preset: EQPreset,
+        chunkPattern: [Int],
+        sampleRate: Double = 48_000
+    ) -> [Float] {
+        let dsp = SystemAudioDSPState()
+        dsp.configure(preset, sampleRate: sampleRate)
+        var output = input
+        output.withUnsafeMutableBufferPointer { buffer in
+            var offset = 0
+            var chunkIndex = 0
+            while offset < buffer.count {
+                let frames = min(chunkPattern[chunkIndex % chunkPattern.count], buffer.count - offset)
+                dsp.process(buffer.baseAddress! + offset, frames: frames, channel: 0)
+                offset += frames
+                chunkIndex += 1
+            }
+        }
+        return output
+    }
+
+    private func maximumDifference(_ lhs: [Float], _ rhs: [Float]) -> Float {
+        zip(lhs, rhs).reduce(0) { max($0, abs($1.0 - $1.1)) }
     }
 
     private func measuredSystemDSPGain(frequency: Double, preset: EQPreset) -> Double {
