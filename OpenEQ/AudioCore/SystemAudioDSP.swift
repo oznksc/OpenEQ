@@ -18,15 +18,14 @@ private struct BiquadCoefficients {
 
 private struct SmoothingCoefficients {
     static let duration = 512
+    private var start: BiquadCoefficients = .identity
     private var current: BiquadCoefficients = .identity
     private var target: BiquadCoefficients = .identity
     private var remaining = 0
 
     mutating func startTransition(to newTarget: BiquadCoefficients) {
-        if remaining > 0 {
-            let t = 1 - Float(remaining) / Float(Self.duration)
-            current = lerp(current, target, t)
-        }
+        current = interpolatedCoeffs()
+        start = current
         target = newTarget
         remaining = Self.duration
     }
@@ -43,9 +42,9 @@ private struct SmoothingCoefficients {
             current = target
             remaining = 0
         } else {
-            let t = 1 - Float(remaining - frames) / Float(Self.duration)
-            current = lerp(current, target, t)
             remaining -= frames
+            let t = 1 - Float(remaining) / Float(Self.duration)
+            current = lerp(start, target, t)
         }
     }
 
@@ -60,11 +59,71 @@ private struct SmoothingCoefficients {
     }
 }
 
-private struct BiquadState {
-    var x1: Float = 0
-    var x2: Float = 0
-    var y1: Float = 0
-    var y2: Float = 0
+private final class VDSPBiquadCascade {
+    private let sectionCount: Int
+    private let setup: vDSP_biquad_Setup
+    private var coefficients: [Float]
+    private var leftDelay: [Float]
+    private var rightDelay: [Float]
+
+    init(sectionCount: Int) {
+        self.sectionCount = sectionCount
+        var initial = [Double](repeating: 0, count: sectionCount * 5)
+        for section in 0..<sectionCount {
+            initial[section * 5] = 1
+        }
+        setup = initial.withUnsafeBufferPointer {
+            vDSP_biquad_CreateSetup($0.baseAddress!, vDSP_Length(sectionCount))!
+        }
+        coefficients = [Float](repeating: 0, count: sectionCount * 5)
+        leftDelay = [Float](repeating: 0, count: sectionCount * 2 + 2)
+        rightDelay = [Float](repeating: 0, count: sectionCount * 2 + 2)
+    }
+
+    deinit {
+        vDSP_biquad_DestroySetup(setup)
+    }
+
+    func updateCoefficients(_ sections: [BiquadCoefficients]) {
+        for section in 0..<sectionCount {
+            let values = sections[section]
+            let offset = section * 5
+            coefficients[offset] = values.b0
+            coefficients[offset + 1] = values.b1
+            coefficients[offset + 2] = values.b2
+            coefficients[offset + 3] = values.a1
+            coefficients[offset + 4] = values.a2
+        }
+        coefficients.withUnsafeBufferPointer {
+            vDSP_biquad_SetCoefficientsSingle(
+                setup,
+                $0.baseAddress!,
+                0,
+                vDSP_Length(sectionCount)
+            )
+        }
+    }
+
+    func process(_ samples: UnsafeMutablePointer<Float>, frames: Int, channel: Int) {
+        if channel == 0 {
+            leftDelay.withUnsafeMutableBufferPointer {
+                vDSP_biquad(setup, $0.baseAddress!, samples, 1, samples, 1, vDSP_Length(frames))
+            }
+        } else {
+            rightDelay.withUnsafeMutableBufferPointer {
+                vDSP_biquad(setup, $0.baseAddress!, samples, 1, samples, 1, vDSP_Length(frames))
+            }
+        }
+    }
+
+    func reset() {
+        leftDelay.withUnsafeMutableBufferPointer {
+            $0.initialize(repeating: 0)
+        }
+        rightDelay.withUnsafeMutableBufferPointer {
+            $0.initialize(repeating: 0)
+        }
+    }
 }
 
 private enum SystemAudioLimiter {
@@ -74,10 +133,11 @@ private enum SystemAudioLimiter {
 }
 
 final class SystemAudioDSPState {
+    private static let sectionCount = 31
     private var smoothingCoeffs = Array(repeating: SmoothingCoefficients(), count: 31)
-    private var leftStates = Array(repeating: BiquadState(), count: 31)
-    private var rightStates = Array(repeating: BiquadState(), count: 31)
     private var currentInterpolated: [BiquadCoefficients] = Array(repeating: .identity, count: 31)
+    private let biquadCascade = VDSPBiquadCascade(sectionCount: sectionCount)
+    private var hasActiveFilters = false
     private var preampLinear: Float = 1
     private var targetPreampLinear: Float = 1
     private var leftLimiterGain: Float = 1
@@ -107,8 +167,9 @@ final class SystemAudioDSPState {
         isEmergencyMuted = false
         smoothingCoeffs = Array(repeating: SmoothingCoefficients(), count: 31)
         currentInterpolated = Array(repeating: .identity, count: 31)
-        leftStates = Array(repeating: BiquadState(), count: 31)
-        rightStates = Array(repeating: BiquadState(), count: 31)
+        hasActiveFilters = false
+        biquadCascade.updateCoefficients(currentInterpolated)
+        biquadCascade.reset()
     }
 
     func process(_ samples: UnsafeMutablePointer<Float>, frames: Int, channel: Int) {
@@ -130,6 +191,10 @@ final class SystemAudioDSPState {
                     currentInterpolated[index] = smoothingCoeffs[index].interpolatedCoeffs()
                     smoothingCoeffs[index].advance(frames: frames)
                 }
+                hasActiveFilters = currentInterpolated.contains { !$0.isIdentity }
+                if hasActiveFilters {
+                    biquadCascade.updateCoefficients(currentInterpolated)
+                }
             }
 
             if abs(preampLinear - 1) > 0.0001 {
@@ -137,10 +202,8 @@ final class SystemAudioDSPState {
                 vDSP_vsmul(samples, 1, &gain, samples, 1, vDSP_Length(frames))
             }
 
-            if channel == 0 {
-                processFilters(samples, frames: frames, states: &leftStates)
-            } else {
-                processFilters(samples, frames: frames, states: &rightStates)
+            if hasActiveFilters {
+                biquadCascade.process(samples, frames: frames, channel: channel)
             }
         }
 
@@ -148,32 +211,6 @@ final class SystemAudioDSPState {
             applyPeakLimiter(samples, frames: frames, gain: &leftLimiterGain)
         } else {
             applyPeakLimiter(samples, frames: frames, gain: &rightLimiterGain)
-        }
-    }
-
-    private func processFilters(
-        _ samples: UnsafeMutablePointer<Float>,
-        frames: Int,
-        states: inout [BiquadState]
-    ) {
-        for band in currentInterpolated.indices {
-            let coeff = currentInterpolated[band]
-            if coeff.isIdentity { continue }
-            var state = states[band]
-            for index in 0..<frames {
-                let input = samples[index]
-                let output = coeff.b0 * input
-                    + coeff.b1 * state.x1
-                    + coeff.b2 * state.x2
-                    - coeff.a1 * state.y1
-                    - coeff.a2 * state.y2
-                samples[index] = output
-                state.x2 = state.x1
-                state.x1 = input
-                state.y2 = state.y1
-                state.y1 = output
-            }
-            states[band] = state
         }
     }
 
@@ -200,6 +237,10 @@ final class SystemAudioDSPState {
 
     private static func makeCoefficients(for band: EQBand, sampleRate: Float) -> BiquadCoefficients {
         guard band.isEnabled, sampleRate > 0 else { return .identity }
+        if abs(band.gain) < 0.0001,
+           band.filterType == .parametric || band.filterType == .lowShelf || band.filterType == .highShelf {
+            return .identity
+        }
         let frequency = max(20, min(band.frequency, sampleRate * 0.49))
         let omega = 2 * Float.pi * frequency / sampleRate
         let sine = sin(omega)

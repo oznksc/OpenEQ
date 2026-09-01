@@ -166,7 +166,7 @@ final class ExternalLoopbackEngine {
             let modelBand = preset.bands[index]
             audioBand.frequency = modelBand.frequency
             audioBand.gain = modelBand.gain
-            audioBand.bandwidth = modelBand.q
+            audioBand.bandwidth = modelBand.audioUnitBandwidth
             audioBand.filterType = modelBand.audioUnitFilterType(for: preset.mode)
             audioBand.bypass = !modelBand.isEnabled
         }

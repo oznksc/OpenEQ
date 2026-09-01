@@ -125,6 +125,10 @@ struct EQBand: Identifiable, Codable, Equatable {
     var frequencyLabel: String {
         return label
     }
+
+    var audioUnitBandwidth: Float {
+        2 * asinh(1 / (2 * q)) / log(2)
+    }
 }
 
 extension EQBand {

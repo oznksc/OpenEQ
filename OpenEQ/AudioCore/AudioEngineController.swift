@@ -100,7 +100,7 @@ final class AudioEngineController {
                 audioBand.frequency = defaultBands[index].frequency
             }
             audioBand.filterType = .parametric
-            audioBand.bandwidth = EQBand.defaultQ
+            audioBand.bandwidth = EQBand(frequency: audioBand.frequency).audioUnitBandwidth
             audioBand.gain = EQBand.neutralGain
             audioBand.bypass = false
         }
@@ -485,7 +485,7 @@ final class AudioEngineController {
             let modelBand = bands[index]
             audioBand.frequency = modelBand.frequency
             audioBand.gain = modelBand.gain
-            audioBand.bandwidth = modelBand.q
+            audioBand.bandwidth = modelBand.audioUnitBandwidth
             audioBand.filterType = modelBand.audioUnitFilterType(for: mode)
             audioBand.bypass = !modelBand.isEnabled
         }

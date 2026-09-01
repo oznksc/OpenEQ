@@ -44,6 +44,14 @@ Unit tests are written using the XCTest framework. DSP equations must be verifie
 *   **Collision Prevention:** Confirm that imported presets acquire unique IDs (UUIDs) to prevent overwriting existing templates.
 *   **Edge Cases:** Validate that empty-named presets are rejected and frequency/gain constraints remain bound to limits.
 
+### 2.3. System Audio DSP Accuracy
+*   **Flat Transparency:** A neutral preset must reproduce sub-limiter samples within `1e-6` absolute error.
+*   **Frequency Response:** A `+6 dB` parametric band must measure within `0.2 dB` at its center frequency and remain selective away from the band.
+*   **Filter Shape:** High-pass attenuation is measured below and above cutoff using steady-state sine probes.
+*   **Engine Parity:** The system vDSP engine and `AVAudioUnitEQ` must agree at the parametric band center within `0.25 dB` after converting Q to octave bandwidth.
+*   **Linearity:** Below the limiter threshold, residual harmonic distortion must remain below `-70 dB` for the reference probe.
+*   **Stress Safety:** Maximum multi-band boost plus preamp must produce finite samples bounded to the output range.
+
 ---
 
 ## 🔗 3. Integration Testing

@@ -486,6 +486,186 @@ final class OpenEQTests: XCTestCase {
         XCTAssertGreaterThan(samples[0], 0)
     }
 
+    func testAudioUnitBandwidthMatchesQDefinition() {
+        XCTAssertEqual(EQBand(frequency: 1000, q: 1).audioUnitBandwidth, 1.388, accuracy: 0.001)
+        XCTAssertGreaterThan(EQBand(frequency: 1000, q: 0.5).audioUnitBandwidth, EQBand(frequency: 1000, q: 2).audioUnitBandwidth)
+    }
+
+    func testSystemAudioDSPFlatPresetIsTransparent() {
+        let frameCount = 8192
+        let input = sineWave(frequency: 997, frameCount: frameCount, amplitude: 0.25)
+        let output = processSystemDSP(input, preset: .flatPreset())
+        let maximumError = zip(input, output).map { abs($0 - $1) }.max() ?? 1
+
+        XCTAssertLessThan(maximumError, 1e-6)
+    }
+
+    func testSystemAudioDSPParametricBoostMatchesRequestedGain() {
+        let band = EQBand(frequency: 1000, gain: 6, q: 1, filterType: .parametric)
+        let preset = EQPreset(name: "1 kHz +6 dB", mode: .parametric, bands: [band])
+
+        XCTAssertEqual(measuredSystemDSPGain(frequency: 1000, preset: preset), 6, accuracy: 0.2)
+        XCTAssertLessThan(abs(measuredSystemDSPGain(frequency: 100, preset: preset)), 0.2)
+    }
+
+    func testSystemAudioDSPMatchesAVAudioUnitEQAtBandCenter() throws {
+        let band = EQBand(frequency: 1000, gain: 6, q: 1, filterType: .parametric)
+        let preset = EQPreset(name: "Engine parity", mode: .parametric, bands: [band])
+        let systemGain = measuredSystemDSPGain(frequency: 1000, preset: preset)
+        let audioUnitGain = try measuredAudioUnitGain(frequency: 1000, band: band)
+
+        XCTAssertEqual(systemGain, audioUnitGain, accuracy: 0.25)
+    }
+
+    func testSystemAudioDSPPreampGainIsCalibrated() {
+        let preset = EQPreset(name: "+6 dB preamp", bands: [], preamp: 6)
+
+        XCTAssertEqual(measuredSystemDSPGain(frequency: 997, preset: preset), 6, accuracy: 0.15)
+    }
+
+    func testSystemAudioDSPHighPassAttenuatesLowFrequencies() {
+        let band = EQBand(frequency: 1000, q: 0.707, filterType: .highPass)
+        let preset = EQPreset(name: "1 kHz high-pass", mode: .parametric, bands: [band])
+
+        XCTAssertLessThan(measuredSystemDSPGain(frequency: 100, preset: preset), -35)
+        XCTAssertGreaterThan(measuredSystemDSPGain(frequency: 5000, preset: preset), -0.1)
+    }
+
+    func testSystemAudioDSPDoesNotAddMeasurableHarmonicDistortionBelowLimiter() {
+        let frequency = 1000.0
+        let input = sineWave(frequency: frequency, frameCount: 48_000, amplitude: 0.05)
+        let band = EQBand(frequency: Float(frequency), gain: 12, q: 1, filterType: .parametric)
+        let preset = EQPreset(name: "THD probe", mode: .parametric, bands: [band])
+        let output = processSystemDSP(input, preset: preset)
+
+        XCTAssertLessThan(measuredTHDDecibels(Array(output[4800..<48_000]), frequency: frequency), -70)
+    }
+
+    func testSystemAudioDSPExtremeBoostStaysFiniteAndLimited() {
+        let bands = EQBand.defaultBands(count: .thirtyOne).map {
+            EQBand(frequency: $0.frequency, gain: 12, q: $0.q)
+        }
+        let preset = EQPreset(name: "Stress", bands: bands, preamp: 12)
+        let output = processSystemDSP(sineWave(frequency: 1000, frameCount: 8192, amplitude: 0.9), preset: preset)
+
+        XCTAssertTrue(output.allSatisfy(\.isFinite))
+        XCTAssertLessThanOrEqual(output.map(abs).max() ?? 2, 1)
+    }
+
+    private func sineWave(
+        frequency: Double,
+        frameCount: Int,
+        amplitude: Float,
+        sampleRate: Double = 48_000
+    ) -> [Float] {
+        (0..<frameCount).map {
+            amplitude * sin(2 * Float.pi * Float(frequency) * Float($0) / Float(sampleRate))
+        }
+    }
+
+    private func processSystemDSP(
+        _ input: [Float],
+        preset: EQPreset,
+        sampleRate: Double = 48_000,
+        blockSize: Int = 256
+    ) -> [Float] {
+        let dsp = SystemAudioDSPState()
+        dsp.configure(preset, sampleRate: sampleRate)
+        var output = input
+        output.withUnsafeMutableBufferPointer { buffer in
+            var offset = 0
+            while offset < buffer.count {
+                let frames = min(blockSize, buffer.count - offset)
+                dsp.process(buffer.baseAddress! + offset, frames: frames, channel: 0)
+                offset += frames
+            }
+        }
+        return output
+    }
+
+    private func measuredSystemDSPGain(frequency: Double, preset: EQPreset) -> Double {
+        let amplitude: Float = 0.05
+        let input = sineWave(frequency: frequency, frameCount: 48_000, amplitude: amplitude)
+        let output = processSystemDSP(input, preset: preset)
+        let settled = output.dropFirst(4096)
+        let outputRMS = sqrt(settled.reduce(0.0) { $0 + Double($1 * $1) } / Double(settled.count))
+        let inputRMS = Double(amplitude) / sqrt(2)
+        return 20 * log10(outputRMS / inputRMS)
+    }
+
+    private func measuredAudioUnitGain(
+        frequency: Double,
+        band: EQBand,
+        sampleRate: Double = 48_000
+    ) throws -> Double {
+        let frameCount = 48_000
+        let amplitude: Float = 0.05
+        let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1)!
+        let sourceBuffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(frameCount))!
+        sourceBuffer.frameLength = AVAudioFrameCount(frameCount)
+        let input = sineWave(frequency: frequency, frameCount: frameCount, amplitude: amplitude, sampleRate: sampleRate)
+        input.withUnsafeBufferPointer {
+            sourceBuffer.floatChannelData![0].update(from: $0.baseAddress!, count: frameCount)
+        }
+
+        let engine = AVAudioEngine()
+        let player = AVAudioPlayerNode()
+        let equalizer = AVAudioUnitEQ(numberOfBands: 1)
+        let audioBand = equalizer.bands[0]
+        audioBand.filterType = .parametric
+        audioBand.frequency = band.frequency
+        audioBand.gain = band.gain
+        audioBand.bandwidth = band.audioUnitBandwidth
+        audioBand.bypass = false
+        engine.attach(player)
+        engine.attach(equalizer)
+        engine.connect(player, to: equalizer, format: format)
+        engine.connect(equalizer, to: engine.mainMixerNode, format: format)
+        try engine.enableManualRenderingMode(.offline, format: format, maximumFrameCount: 256)
+        player.scheduleBuffer(sourceBuffer)
+        try engine.start()
+        player.play()
+
+        let renderBuffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 256)!
+        var output = [Float]()
+        output.reserveCapacity(frameCount)
+        while output.count < frameCount {
+            let requested = AVAudioFrameCount(min(256, frameCount - output.count))
+            let status = try engine.renderOffline(requested, to: renderBuffer)
+            if status == .success {
+                output.append(contentsOf: UnsafeBufferPointer(start: renderBuffer.floatChannelData![0], count: Int(renderBuffer.frameLength)))
+            } else if status != .insufficientDataFromInputNode {
+                XCTFail("Offline Audio Unit rendering failed with status \(status.rawValue)")
+                break
+            }
+        }
+        player.stop()
+        engine.stop()
+
+        let settled = output.dropFirst(4096)
+        let outputRMS = sqrt(settled.reduce(0.0) { $0 + Double($1 * $1) } / Double(settled.count))
+        return 20 * log10(outputRMS / (Double(amplitude) / sqrt(2)))
+    }
+
+    private func measuredTHDDecibels(_ samples: [Float], frequency: Double, sampleRate: Double = 48_000) -> Double {
+        var sineProjection = 0.0
+        var cosineProjection = 0.0
+        var totalEnergy = 0.0
+        for (index, sample) in samples.enumerated() {
+            let phase = 2 * Double.pi * frequency * Double(index) / sampleRate
+            let value = Double(sample)
+            sineProjection += value * sin(phase)
+            cosineProjection += value * cos(phase)
+            totalEnergy += value * value
+        }
+        let scale = 2 / Double(samples.count)
+        let sineAmplitude = sineProjection * scale
+        let cosineAmplitude = cosineProjection * scale
+        let fundamentalEnergy = Double(samples.count) * (sineAmplitude * sineAmplitude + cosineAmplitude * cosineAmplitude) / 2
+        let residualEnergy = max(0, totalEnergy - fundamentalEnergy)
+        return 10 * log10(max(residualEnergy, 1e-20) / max(fundamentalEnergy, 1e-20))
+    }
+
     // MARK: - Phase 2
 
     func testFeedbackGuardGracePeriodIgnoresHotSignal() {
