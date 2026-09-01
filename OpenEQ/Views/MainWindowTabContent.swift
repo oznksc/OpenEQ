@@ -234,6 +234,40 @@ private struct SpectrumBackdropView: View {
                                 endPoint: CGPoint(x: 0, y: barRect.maxY)
                             )
                         )
+                    case .prism:
+                        let prismRect = CGRect(
+                            x: x + barWidth * 0.28,
+                            y: barRect.minY,
+                            width: max(1, barWidth * 0.44),
+                            height: barRect.height
+                        )
+                        context.fill(
+                            Path(roundedRect: prismRect, cornerRadius: prismRect.width / 2),
+                            with: .linearGradient(
+                                Gradient(colors: [Color.blue.opacity(0.12), Color.cyan.opacity(0.82), Color.white.opacity(0.55)]),
+                                startPoint: CGPoint(x: prismRect.midX, y: prismRect.maxY),
+                                endPoint: CGPoint(x: prismRect.midX, y: prismRect.minY)
+                            )
+                        )
+                    case .orbit:
+                        let radius = 2 + level * 5
+                        let orb = CGRect(x: tracePoint.x - radius, y: tracePoint.y - radius, width: radius * 2, height: radius * 2)
+                        context.fill(Path(ellipseIn: orb), with: .color(Color.pink.opacity(0.72)))
+                    case .matrix:
+                        let blockCount = max(1, Int(ceil(level * 8)))
+                        let blockHeight = usableHeight / 10
+                        for block in 0..<blockCount {
+                            let blockRect = CGRect(
+                                x: x + 0.5,
+                                y: baseline - CGFloat(block + 1) * blockHeight,
+                                width: max(1, barWidth - 1),
+                                height: max(1, blockHeight - 2)
+                            )
+                            context.fill(
+                                Path(roundedRect: blockRect, cornerRadius: 1),
+                                with: .color(Color.green.opacity(0.25 + Double(block) * 0.06))
+                            )
+                        }
                     }
 
                     if style != .aurora {

@@ -43,13 +43,7 @@ struct EqualizerView: View {
                 )
                 .frame(width: 170)
 
-                StudioSegmentedPicker(
-                    selection: $spectrumStyle,
-                    items: SpectrumVisualizationStyle.allCases,
-                    titleFor: { $0.title },
-                    iconFor: { $0.icon }
-                )
-                .frame(width: 235)
+                spectrumStyleMenu
             }
 
             if viewModel.eqMode == .parametric {
@@ -127,6 +121,37 @@ struct EqualizerView: View {
         .clipped()
         .opacity(viewModel.isEnabled ? 1 : 0.4)
         .animation(.easeInOut(duration: 0.2), value: viewModel.isEnabled)
+    }
+
+    private var spectrumStyleMenu: some View {
+        Menu {
+            ForEach(SpectrumVisualizationStyle.allCases) { style in
+                Button {
+                    withAnimation(.spring(response: 0.22, dampingFraction: 0.72)) {
+                        spectrumStyle = style
+                    }
+                } label: {
+                    Label(style.title, systemImage: style.icon)
+                }
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: spectrumStyle.icon)
+                    .foregroundStyle(spectrumStyle.accentColor)
+                Text(spectrumStyle.title)
+                    .font(.system(size: 11, weight: .semibold))
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(.ultraThinMaterial, in: Capsule())
+            .overlay { Capsule().stroke(Color.white.opacity(0.12), lineWidth: 0.8) }
+        }
+        .menuStyle(.borderlessButton)
+        .help("Spectrum style")
+        .accessibilityLabel("Spectrum style: \(spectrumStyle.title)")
     }
 
     private var preampControl: some View {
