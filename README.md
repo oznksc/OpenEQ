@@ -23,7 +23,7 @@ OpenEQ is a lightweight desktop EQ for:
 - Real-time **64-band FFT spectrum** (Canvas + vDSP)
 - **Comfort Guard:** local-only listening-load tracking from live peak/spectrum data, with break guidance and optional reversible treble relief
 - Built-in presets + custom save/import/export (JSON)
-- Menu bar: bypass, volume, recent presets, playback controls
+- **Normal, Menu Bar, and Both app modes:** the compact menu-bar panel controls System Audio, EQ bypass, output status, and every built-in preset without opening the main window
 
 ### System audio (driverless, experimental-hardened)
 Requires **macOS 14.2+** and **Screen & System Audio Recording** permission.

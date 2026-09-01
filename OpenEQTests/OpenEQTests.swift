@@ -4,6 +4,15 @@ import AVFoundation
 
 @MainActor
 final class OpenEQTests: XCTestCase {
+    func testAppPresentationModesExposeExpectedSurfaces() {
+        XCTAssertTrue(AppPresentationMode.dock.showsDockIcon)
+        XCTAssertFalse(AppPresentationMode.dock.showsMenuBarExtra)
+        XCTAssertFalse(AppPresentationMode.menuBar.showsDockIcon)
+        XCTAssertTrue(AppPresentationMode.menuBar.showsMenuBarExtra)
+        XCTAssertTrue(AppPresentationMode.both.showsDockIcon)
+        XCTAssertTrue(AppPresentationMode.both.showsMenuBarExtra)
+    }
+
     // MARK: - EQBand
 
     func testEQBandClampsInitialParameters() {

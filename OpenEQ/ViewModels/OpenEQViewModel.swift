@@ -148,6 +148,7 @@ final class OpenEQViewModel {
     var autoApplyDeviceProfiles: Bool = AppPreferences.autoApplyDeviceProfiles
     var feedbackProtectionEnabled: Bool = AppPreferences.feedbackProtectionEnabled
     var preferSystemEQOnLaunch: Bool = AppPreferences.preferSystemEQOnLaunch
+    var presentationMode: AppPresentationMode = AppPreferences.presentationMode
     var safetyBannerMessage: String?
     var selectedBandID: EQBand.ID?
     var dynamics: DynamicsSettings = .default
@@ -302,6 +303,7 @@ final class OpenEQViewModel {
 
     /// Called once from the app root after the UI is ready.
     func handleAppLaunch() {
+        applyPresentationMode()
         processEnumerator.start()
         audioProcesses = processEnumerator.processes
         graphStore.onTopologyChanged = { [weak self] in
@@ -311,6 +313,16 @@ final class OpenEQViewModel {
         if preferSystemEQOnLaunch {
             enableSystemEQOneClick()
         }
+    }
+
+    func setPresentationMode(_ mode: AppPresentationMode) {
+        presentationMode = mode
+        AppPreferences.presentationMode = mode
+        applyPresentationMode()
+    }
+
+    private func applyPresentationMode() {
+        NSApplication.shared.setActivationPolicy(presentationMode.showsDockIcon ? .regular : .accessory)
     }
 
     func refreshAudioProcesses() {

@@ -72,6 +72,27 @@ struct MainWindowTabContent: View {
             }
 
             VStack(alignment: .leading, spacing: 14) {
+                Text("APP MODE")
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .tracking(1)
+                    .foregroundStyle(.secondary)
+
+                Picker("App Mode", selection: Binding(
+                    get: { viewModel.presentationMode },
+                    set: { viewModel.setPresentationMode($0) }
+                )) {
+                    ForEach(AppPresentationMode.allCases) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                Text(viewModel.presentationMode.description)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.secondary)
+
+                Divider().opacity(0.15)
+
                 Text("SPECTRUM THEME")
                     .font(.system(size: 10, weight: .bold, design: .monospaced))
                     .tracking(1)

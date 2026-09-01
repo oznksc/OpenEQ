@@ -3,77 +3,141 @@ import AppKit
 
 struct MenuBarView: View {
     @Bindable var viewModel: OpenEQViewModel
+    @Environment(\.openWindow) private var openWindow
+
+    private var builtInPresets: [EQPreset] {
+        let builtInIDs = Set(EQPreset.defaultPresets().map(\.id))
+        return viewModel.presets.filter { builtInIDs.contains($0.id) }
+    }
 
     var body: some View {
-        // MenuBarExtra(.menu) expects Button/Toggle/Divider — keep native menu structure.
-        Toggle(isOn: toggleBinding) {
-            Text(viewModel.isEnabled ? "EQ Enabled" : "EQ Bypassed")
-        }
-
-        if viewModel.selectedFileURL != nil {
+        VStack(spacing: 0) {
+            header
             Divider()
-            Text(viewModel.selectedFileName)
-            Button("Play") { viewModel.play() }
-                .disabled(viewModel.playbackState == .playing)
-            Button("Pause") { viewModel.pause() }
-                .disabled(viewModel.playbackState != .playing)
-            Button("Stop") { viewModel.stop() }
+            controls
+            Divider()
+            presets
+            Divider()
+            footer
         }
+        .frame(width: 320)
+        .background(.ultraThinMaterial)
+    }
 
-        Divider()
+    private var header: some View {
+        HStack(spacing: 10) {
+            Image(systemName: viewModel.isSystemEQActive ? "waveform.circle.fill" : "waveform.circle")
+                .font(.system(size: 24))
+                .foregroundStyle(viewModel.isSystemEQActive ? .green : .secondary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("OpenEQ").font(.headline)
+                Text(statusText).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
+            Spacer()
+            Circle()
+                .fill(viewModel.isSystemEQActive ? Color.green : Color.secondary.opacity(0.4))
+                .frame(width: 8, height: 8)
+        }
+        .padding(14)
+    }
 
-        Text("Preset: \(viewModel.selectedPreset.name)")
-
-        if !viewModel.recentPresets.isEmpty {
-            ForEach(viewModel.recentPresets.prefix(3)) { preset in
-                Button(preset.name) {
-                    viewModel.applyPreset(preset)
+    private var controls: some View {
+        VStack(spacing: 10) {
+            HStack(spacing: 10) {
+                compactButton(
+                    viewModel.isSystemEQActive ? "Stop System Audio" : "Start System Audio",
+                    icon: viewModel.isSystemEQActive ? "stop.fill" : "play.fill",
+                    tint: viewModel.isSystemEQActive ? .red : .green
+                ) { viewModel.toggleSystemEQOneClick() }
+                compactButton(viewModel.isEnabled ? "Bypass EQ" : "Enable EQ", icon: "power", tint: .blue) {
+                    viewModel.setEnabled(!viewModel.isEnabled)
                 }
             }
-        }
 
-        Divider()
+            if let output = viewModel.activePhysicalOutputName ?? viewModel.selectedSystemOutputDevice?.name {
+                Label(output, systemImage: "speaker.wave.2.fill")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
 
-        Button(viewModel.isSystemEQActive ? "Stop System EQ" : "Start System EQ") {
-            viewModel.toggleSystemEQOneClick()
-            NSApplication.shared.activate(ignoringOtherApps: true)
-        }
-
-        if viewModel.isSystemEQActive || viewModel.isExternalLoopbackActive {
             if viewModel.didTripFeedbackProtection {
                 Button("Resume after feedback trip") {
                     viewModel.clearFeedbackProtectionTrip()
                 }
-            }
-
-            Button("Emergency Stop") {
-                viewModel.enterSafeMode()
+                .buttonStyle(.borderedProminent)
+                .tint(.orange)
             }
         }
-
-        Button("System Audio…") {
-            viewModel.isShowingSystemAudio = true
-            NSApplication.shared.activate(ignoringOtherApps: true)
-        }
-
-        Button("Show OpenEQ") {
-            NSApplication.shared.activate(ignoringOtherApps: true)
-        }
-        .keyboardShortcut("o")
-
-        Divider()
-
-        Button("Quit OpenEQ") {
-            viewModel.shutdown()
-            NSApplication.shared.terminate(nil)
-        }
-        .keyboardShortcut("q")
+        .padding(14)
     }
 
-    private var toggleBinding: Binding<Bool> {
-        Binding(
-            get: { viewModel.isEnabled },
-            set: { viewModel.setEnabled($0) }
-        )
+    private var presets: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("PRESETS")
+                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                .foregroundStyle(.secondary)
+
+            ScrollView {
+                LazyVStack(spacing: 4) {
+                    ForEach(builtInPresets) { preset in
+                        Button {
+                            viewModel.applyPreset(preset)
+                        } label: {
+                            HStack {
+                                Text(preset.name).lineLimit(1)
+                                Spacer()
+                                if preset.id == viewModel.selectedPreset.id {
+                                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.blue)
+                                }
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 7)
+                        .background(
+                            preset.id == viewModel.selectedPreset.id ? Color.blue.opacity(0.12) : Color.clear,
+                            in: RoundedRectangle(cornerRadius: 7)
+                        )
+                    }
+                }
+            }
+            .frame(maxHeight: 210)
+        }
+        .padding(14)
+    }
+
+    private var footer: some View {
+        HStack {
+            Button("Open Main Window") {
+                openWindow(id: "main")
+                NSApplication.shared.activate(ignoringOtherApps: true)
+            }
+            Spacer()
+            Button("Quit") {
+                viewModel.shutdown()
+                NSApplication.shared.terminate(nil)
+            }
+        }
+        .buttonStyle(.borderless)
+        .padding(14)
+    }
+
+    private func compactButton(_ title: String, icon: String, tint: Color, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: icon)
+                .font(.caption.weight(.semibold))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 7)
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(tint)
+    }
+
+    private var statusText: String {
+        if viewModel.isSystemEQActive { return "System Audio · \(viewModel.selectedPreset.name)" }
+        if viewModel.systemAudioStatus == .permissionRequired { return "Permission required" }
+        return viewModel.isEnabled ? "Ready · \(viewModel.selectedPreset.name)" : "EQ bypassed"
     }
 }

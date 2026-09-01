@@ -10,6 +10,7 @@ enum AppPreferences {
         static let feedbackProtectionEnabled = "openeq.feedbackProtectionEnabled"
         static let listeningComfortEnabled = "openeq.listeningComfortEnabled"
         static let listeningComfortAutoSootheEnabled = "openeq.listeningComfortAutoSootheEnabled"
+        static let presentationMode = "openeq.presentationMode"
     }
 
     static var hasCompletedSystemEQOnboarding: Bool {
@@ -55,5 +56,13 @@ enum AppPreferences {
     static var listeningComfortAutoSootheEnabled: Bool {
         get { defaults.bool(forKey: Key.listeningComfortAutoSootheEnabled) }
         set { defaults.set(newValue, forKey: Key.listeningComfortAutoSootheEnabled) }
+    }
+
+    static var presentationMode: AppPresentationMode {
+        get {
+            guard let rawValue = defaults.string(forKey: Key.presentationMode) else { return .both }
+            return AppPresentationMode(rawValue: rawValue) ?? .both
+        }
+        set { defaults.set(newValue.rawValue, forKey: Key.presentationMode) }
     }
 }

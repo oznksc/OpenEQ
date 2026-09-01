@@ -18,7 +18,7 @@ struct OpenEQApp: App {
     )
 
     var body: some Scene {
-        WindowGroup {
+        WindowGroup("OpenEQ", id: "main") {
             ContentView(viewModel: viewModel)
                 .onAppear {
                     appDelegate.viewModel = viewModel
@@ -76,12 +76,19 @@ struct OpenEQApp: App {
             }
         }
 
-        MenuBarExtra {
+        MenuBarExtra(isInserted: Binding(
+            get: { viewModel.presentationMode.showsMenuBarExtra },
+            set: { isInserted in
+                if !isInserted && viewModel.presentationMode == .both {
+                    viewModel.setPresentationMode(.dock)
+                }
+            }
+        )) {
             MenuBarView(viewModel: viewModel)
         } label: {
             Image(systemName: viewModel.isEnabled ? "slider.vertical.3" : "speaker.slash")
         }
-        .menuBarExtraStyle(.menu)
+        .menuBarExtraStyle(.window)
     }
 }
 
