@@ -1,0 +1,67 @@
+name: Bug report
+description: Report a crash, audio glitch or unexpected behavior
+labels: [bug]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: A clear description of the problem.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open a file / turn on System-Wide EQ / ...
+        2. Adjust ...
+        3. See ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen?
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Mode
+      options:
+        - Local file playback
+        - System-Wide EQ
+        - External Loopback
+        - Not sure
+    validations:
+      required: true
+  - type: input
+    id: openeq-version
+    attributes:
+      label: OpenEQ version
+      description: OpenEQ menu → About OpenEQ
+      placeholder: "1.1.0"
+    validations:
+      required: true
+  - type: input
+    id: macos-version
+    attributes:
+      label: macOS version
+      placeholder: "macOS 26.1"
+    validations:
+      required: true
+  - type: input
+    id: mac
+    attributes:
+      label: Mac model
+      placeholder: "MacBook Pro M3, Mac mini Intel, ..."
+  - type: input
+    id: output-device
+    attributes:
+      label: Audio output device
+      placeholder: "Built-in speakers, USB DAC, AirPods, BlackHole, ..."
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: Optional. Crash reports or Console output filtered by "OpenEQ".
+      render: text
