@@ -1,0 +1,15 @@
+<?xml version="1.0" standalone="yes"?>
+<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+    <channel>
+        <title>OpenEQ</title>
+        <item>
+            <title>1.1.2</title>
+            <pubDate>Thu, 15 Oct 2026 03:37:15 +0300</pubDate>
+            <link>https://oznksc.github.io/OpenEQ/</link>
+            <sparkle:version>4</sparkle:version>
+            <sparkle:shortVersionString>1.1.2</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <enclosure url="https://github.com/oznksc/OpenEQ/releases/download/v1.1.2/OpenEQ-1.1.2.dmg" length="6675735" type="application/octet-stream" sparkle:edSignature="imPYMcFYmd/GJa9zL0yiYUkUsqHd4b9242BzoNRGcvsXTXF/axujsBJZSi1qwqz1zfNn8RMWolOe04dnd1GBAw=="/>
+        </item>
+    </channel>
+</rss>
